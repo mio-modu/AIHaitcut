@@ -160,21 +160,21 @@ const LumainGen = (() => {
         const rw = W * 0.24, rh = rw * (ref.height / ref.width || 1.33);
         const rx = W - rw - 18, ry = 18;
         ctx.save();
-        roundRect(ctx, rx, ry, rw, rh, 12); ctx.clip();
+        roundRect(ctx, rx, ry, rw, rh, 0); ctx.clip();
         ctx.drawImage(ref, rx, ry, rw, rh);
         ctx.restore();
-        ctx.strokeStyle = 'rgba(230,207,156,.9)'; ctx.lineWidth = 3;
-        roundRect(ctx, rx, ry, rw, rh, 12); ctx.stroke();
-        ctx.fillStyle = 'rgba(0,0,0,.55)';
+        ctx.strokeStyle = 'rgba(78,168,255,.9)'; ctx.lineWidth = 2;
+        roundRect(ctx, rx, ry, rw, rh, 0); ctx.stroke();
+        ctx.fillStyle = 'rgba(0,0,0,.6)';
         ctx.fillRect(rx, ry + rh - 26, rw, 26);
-        ctx.fillStyle = '#e6cf9c'; ctx.font = '600 13px "Noto Sans KR"'; ctx.textAlign = 'center';
+        ctx.fillStyle = '#7CC4FF'; ctx.font = '500 12px Pretendard, "Noto Sans KR"'; ctx.textAlign = 'center';
         ctx.fillText('선택 스타일', rx + rw / 2, ry + rh - 8);
       } catch {}
     }
 
     // 데모 표식
-    ctx.fillStyle = 'rgba(110,168,254,.92)';
-    ctx.font = '800 15px "Noto Sans KR"'; ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(124,196,255,.95)';
+    ctx.font = '700 15px Pretendard, "Noto Sans KR"'; ctx.textAlign = 'left';
     ctx.fillText('DEMO · 실제 AI 생성 아님', 18, 30);
 
     return cv.toDataURL('image/jpeg', 0.92);
@@ -192,28 +192,28 @@ const LumainGen = (() => {
     const barH = Math.max(38, Math.round(H * 0.075));
 
     // 하단 반투명 바
-    ctx.fillStyle = 'rgba(15,17,21,.62)';
+    ctx.fillStyle = 'rgba(10,11,13,.66)';
     ctx.fillRect(0, H - barH, W, barH);
-    ctx.fillStyle = 'rgba(201,168,106,.9)';
-    ctx.fillRect(0, H - barH, 5, barH);
+    ctx.fillStyle = 'rgba(78,168,255,.95)';
+    ctx.fillRect(0, H - barH, 4, barH);
 
     const fs = Math.max(15, Math.round(barH * 0.4));
-    ctx.font = `700 ${fs}px "Noto Sans KR"`;
-    ctx.fillStyle = '#f4f6fb';
+    ctx.font = `600 ${fs}px Pretendard, "Noto Sans KR"`;
+    ctx.fillStyle = '#EEF1F5';
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText('AI 예상 이미지 · 실제 결과와 다를 수 있습니다', 20, H - barH / 2);
 
-    // 우하단 브랜드
+    // 우하단 브랜드 (세리프 트래킹 느낌)
     ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(230,207,156,.85)';
-    ctx.font = `800 ${fs}px "Noto Sans KR"`;
-    ctx.fillText('LUMAIN', W - 20, H - barH / 2);
+    ctx.fillStyle = 'rgba(238,241,245,.9)';
+    ctx.font = `700 ${fs}px Pretendard, "Noto Sans KR"`;
+    ctx.fillText('L U M A I N', W - 20, H - barH / 2);
 
     // 대각 반복 워터마크 (연하게)
     ctx.save();
     ctx.globalAlpha = 0.06;
     ctx.fillStyle = '#ffffff';
-    ctx.font = `800 ${Math.round(W * 0.03)}px "Noto Sans KR"`;
+    ctx.font = `700 ${Math.round(W * 0.03)}px Pretendard, "Noto Sans KR"`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.translate(W / 2, H / 2); ctx.rotate(-Math.PI / 9);
     for (let y = -H; y < H; y += Math.round(W * 0.13)) {
