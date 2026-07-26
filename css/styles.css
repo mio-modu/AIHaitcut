@@ -145,7 +145,9 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
   font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
   color: var(--text-dim); background: rgba(10,11,13,.55); border: 1px solid var(--line-2); padding: 6px 11px;
 }
-.stage-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #05060a; }
+/* 결과는 통일된 3:4 세로컷(generate.js normalizePortrait). 남는 자투리는 검은색이 아니라
+   스튜디오 라이트그레이로 채워 배경과 이어지게 한다(좌우 검은 여백 방지). */
+.stage-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #d7dbe0; }
 
 /* idle 상태 — 촬영 진입 */
 .stage-idle { text-align: center; padding: 30px; }
@@ -172,7 +174,7 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 .result-strip { display: flex; gap: 8px; overflow-x: auto; padding-top: 2px; }
 .result-strip .rs {
   flex: 0 0 auto; width: 54px; height: 70px; position: relative; cursor: pointer;
-  border: 1px solid var(--line-2); background: #05060a; overflow: hidden;
+  border: 1px solid var(--line-2); background: #d7dbe0; overflow: hidden;
 }
 .result-strip .rs img { width: 100%; height: 100%; object-fit: cover; }
 .result-strip .rs.on { border-color: var(--accent); box-shadow: var(--glow); }

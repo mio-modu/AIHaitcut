@@ -88,10 +88,12 @@ const LumainGen = (() => {
   //  "배경을 갈아끼우되 인물은 그대로" 를 명시하고 모발 경계를 따로 못박는다.
   const BACKGROUND_MODES = {
     studio: [
-      'BACKGROUND — replace it with a clean salon studio backdrop:',
-      '  • Seamless, evenly lit light-gray backdrop (soft vertical gradient, slightly',
-      '    brighter behind the head). No props, no furniture, no texture, no shadows on the wall.',
+      'BACKGROUND — replace it with ONE clean, standardized salon studio backdrop:',
+      '  • Clean seamless light-grey studio backdrop — the SAME flat, even light grey every time,',
+      '    identical across all generated styles so four results can be compared side by side.',
+      '  • Evenly lit, no props, no furniture, no texture, no wall shadows, no coloured cast.',
       '  • Remove everything from the original background — people, mirrors, signage, clutter.',
+      '  • No black bars, no letterboxing, no original-background bleed anywhere in the frame.',
       '  • Relight the subject subtly so they look genuinely photographed against that backdrop.',
     ],
     white: [
@@ -112,9 +114,18 @@ const LumainGen = (() => {
     if (mode === 'keep') return lines.concat(noImport).join('\n');
     return lines.concat(noImport).concat([
       lockPose
-        ? '  • Keep the person untouched: same pose, same head size and position in the frame,\n'
-          + '    same neck, shoulders and clothing, same camera angle and focal length as IMAGE 1.'
-        : '  • Same person, same clothing, same framing and distance from camera as IMAGE 1.',
+        ? '  • Keep the person untouched: same pose, same head angle and position, same neck and\n'
+          + '    shoulders, same camera angle and focal length as IMAGE 1.'
+        : '  • Same person, same framing and distance from camera as IMAGE 1.',
+      '',
+      'FRAMING & COMPOSITION — standardized and identical for every generated style:',
+      '  • Head-and-shoulders crop, subject centered, with the SAME zoom level and the SAME',
+      '    vertical head position across all four styles. 3:4 vertical portrait ratio.',
+      '  • The subject fills the frame edge to edge — no borders, no padding, no empty margins,',
+      '    and absolutely no black bars on any side.',
+      '  • Top / clothing: a plain, clean, achromatic (grey/white/black) top, the same neutral',
+      '    style across results. Keep the neckline clear of the hair so it never covers or',
+      '    interferes with the hairstyle being previewed. Do not change the face, neck or body.',
       '  • HAIR EDGES: cut around the hair naturally — keep individual flyaway strands and the',
       '    soft silhouette. No hard cut-out outline, no white halo, no eroded or blurred edges.',
       '    The hair outline is what the customer is judging, so it must stay crisp and real.',
@@ -162,7 +173,7 @@ const LumainGen = (() => {
       'POSE — very light correction only:',
       '  Only if the person is severely slouched, nudge the shoulders upright by the smallest',
       "  possible amount. Do NOT change the head angle, head tilt or gaze — those are identity.",
-      '  Same framing, same distance, same clothing, same expression.',
+      '  Same framing, same distance, same expression.',
       '',
     );
 
@@ -247,6 +258,14 @@ const LumainGen = (() => {
       "HAIR COLOR: keep the customer's original hair color. This is a CUT & PERM preview,",
       'not a dye preview — do not lighten, darken or tint the hair.',
       '',
+      'HAIRLINE — blend it naturally so the new hair does not look pasted on:',
+      '  Blend the new hairline naturally into the forehead. The transition between hair and skin',
+      "  at the hairline must be soft and realistic, following the person's actual forehead shape.",
+      '  No hard edge, no pasted-on look, no floating hairline. Include natural baby hairs and a',
+      '  soft gradient at the hairline.',
+      "  Respect the customer's original forehead height and hairline position. Do not raise or",
+      '  lower the hairline unnaturally.',
+      '',
       ...finishingDirectives(refs),
       backgroundDirectives(refs.background, hasRef, refs.posture !== 'fix'),
       '',
@@ -257,6 +276,9 @@ const LumainGen = (() => {
       "  • IMAGE 1's face is replaced, restyled, beautified, slimmed or aged.",
       '  • The person looks YOUNGER, slimmer, smoother-skinned or more "perfect" than IMAGE 1.',
       '  • The face angle, head tilt or gaze direction differs from IMAGE 1.',
+      '  • Black bars, letterboxing or empty margins appear on any side of the frame.',
+      '  • The background, framing, zoom or clothing differs from the standardized studio look.',
+      "  • The hairline looks hard-edged, floating or pasted on instead of blended into the skin.",
       hasRef ? "  • The reference image's background, clothing or body is imported." : '',
       "The customer's face is final.",
       '',
@@ -515,6 +537,30 @@ const LumainGen = (() => {
     return cv.toDataURL('image/jpeg', 0.92);
   }
 
+  // ---- 결과 프레임 정규화 (통일된 3:4 세로컷) -------------------
+  //  프롬프트로 "3:4·검은 여백 금지"를 못박아도 모델이 정사각/가로로 뱉거나
+  //  좌우에 검은 여백을 넣는 경우가 있다. 마지막에 결정적으로 한 번 더 맞춘다:
+  //    • 모든 컷을 동일한 3:4 세로 캔버스로 → 4장 비교 시 비율이 통일된다.
+  //    • cover 맞춤(상단 정렬)으로 프레임을 꽉 채워 좌우/상하 검은 여백을 잘라낸다.
+  //      머리·헤어라인은 상단에 있으므로 남는 부분은 어깨 아래에서만 잘린다.
+  //    • 남는 자투리는 스튜디오 라이트그레이로 채워, 혹시 생겨도 검은 띠가 아니게 한다.
+  const OUT_W = 900, OUT_H = 1200;      // 3:4
+  const STUDIO_GREY = '#d7dbe0';        // styles.css .stage-img 배경과 맞춘다
+  async function normalizePortrait(dataUrl) {
+    const img = await loadImage(dataUrl);
+    const cv = document.createElement('canvas');
+    cv.width = OUT_W; cv.height = OUT_H;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = STUDIO_GREY;
+    ctx.fillRect(0, 0, OUT_W, OUT_H);
+    // cover: 캔버스를 완전히 덮는 최소 배율. 세로컷이면 아래(어깨)가, 정사각/가로면
+    // 좌우(=검은 여백이 있던 자리)가 잘려나간다. 인물은 중앙, 머리는 상단 유지.
+    const s = Math.max(OUT_W / img.width, OUT_H / img.height);
+    const dw = img.width * s, dh = img.height * s;
+    ctx.drawImage(img, (OUT_W - dw) / 2, 0, dw, dh);
+    return cv.toDataURL('image/jpeg', 0.92);
+  }
+
   // ---- 워터마크 굽기 (공통 후처리, 캡처해도 따라감) -----------
   async function bakeWatermark(dataUrl) {
     const img = await loadImage(dataUrl);
@@ -593,6 +639,11 @@ const LumainGen = (() => {
 
     onProgress && onProgress('watermark');
     const guard = getSettings().faceGuard ? await faceSimilarityCheck(faceImage, raw) : { ok: true };
+    // 4컷 비율·구도 통일 + 좌우 검은 여백 제거. 'keep' 은 원본 구도 보존이 목적이라 건드리지 않는다.
+    if (getSettings().background !== 'keep') {
+      try { raw = await normalizePortrait(raw); }
+      catch (e) { console.warn('[LumainGen] 프레임 정규화 실패 → 원본 비율 유지:', e.message); }
+    }
     const finalUrl = await bakeWatermark(raw);
 
     return {
