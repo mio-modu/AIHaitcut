@@ -602,6 +602,26 @@
           </select>
           <div class="purge-note" style="margin-top:8px">매장 내부가 그대로 찍히는 걸 막고 머리 모양에 시선이 가게 합니다.
             순백은 밝은 모발 끝이 배경에 묻힐 수 있어, 잔머리 경계는 <b>스튜디오 그레이</b>가 더 잘 살아납니다.</div></div>
+        <div class="field" style="margin-top:14px"><label>견본 모델 얼굴 가리기</label>
+          <select id="setMask">
+            <option value="on"${s.maskRefFace !== false ? ' selected' : ''}>가리고 전송 (권장)</option>
+            <option value="off"${s.maskRefFace === false ? ' selected' : ''}>원본 그대로 전송</option>
+          </select>
+          <div class="purge-note" style="margin-top:8px;color:var(--danger);border-color:rgba(255,90,110,.3)">
+            ⚠ 끄면 <b style="color:var(--danger)">결과에 견본 모델 얼굴이 나올 수 있습니다.</b>
+            직접 올린 카드에서 머리가 가려지는 경우에만 끄세요.</div></div>
+        <div class="field" style="margin-top:14px"><label>피부 보정</label>
+          <select id="setSkin">
+            <option value="light"${s.skinCleanup !== 'none' ? ' selected' : ''}>가볍게 정리 — 톤·유분·잡티 (권장)</option>
+            <option value="none"${s.skinCleanup === 'none' ? ' selected' : ''}>원본 그대로</option>
+          </select></div>
+        <div class="field" style="margin-top:14px"><label>자세 교정</label>
+          <select id="setPose">
+            <option value="fix"${s.posture !== 'keep' ? ' selected' : ''}>정면·바른 자세로 교정 (권장)</option>
+            <option value="keep"${s.posture === 'keep' ? ' selected' : ''}>원본 자세 유지</option>
+          </select>
+          <div class="purge-note" style="margin-top:8px">보정은 <b>얼굴 동일성보다 우선하지 않도록</b> 지시됩니다.
+            그래도 인물이 달라 보이면 두 항목을 "원본"으로 두세요.</div></div>
         <div class="purge-note" style="margin-top:16px;color:var(--danger);border-color:rgba(255,90,110,.3)">
           ⚠ <b style="color:var(--danger)">보안:</b> 지금은 단일 웹앱이라 키가 이 브라우저에 저장됩니다.
           원장님 <b style="color:var(--danger)">본인 태블릿 1대</b>에서만 쓰세요. 손님/직원에게 여는 단계엔 백엔드(2단계)로 옮겨야 합니다.</div>
@@ -627,6 +647,9 @@
         mode: $('#setMode', bd).value, geminiKey: $('#setKey', bd).value.trim(),
         model: modelInput.value.trim() || LumainGen.DEFAULTS.model, faceGuard: true,
         background: $('#setBg', bd).value,
+        maskRefFace: $('#setMask', bd).value === 'on',
+        skinCleanup: $('#setSkin', bd).value,
+        posture: $('#setPose', bd).value,
       });
       bd.remove(); toast('설정을 저장했습니다.'); renderStudio();
     };

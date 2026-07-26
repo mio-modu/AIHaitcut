@@ -22,6 +22,9 @@ const LumainGen = (() => {
     model: 'gemini-3.1-flash-lite-image',
     faceGuard: true,                    // 얼굴 유사도 경고 사용
     background: 'studio',               // 'studio' | 'white' | 'keep' — 누끼 처리 방식
+    maskRefFace: true,                  // 견본 모델 얼굴을 지우고 전송 (결과에 견본 얼굴 방지)
+    skinCleanup: 'light',               // 'light' | 'none' — 피부 톤 정리
+    posture: 'fix',                     // 'fix' | 'keep' — 정면 바른 자세로 교정
   };
 
   // 이미 설정을 저장한 브라우저는 옛 모델명이 localStorage 에 박혀 있어
@@ -79,12 +82,19 @@ const LumainGen = (() => {
     ],
     keep: ['BACKGROUND: keep the original background, lighting and camera angle unchanged.'],
   };
-  function backgroundDirectives(mode) {
+  function backgroundDirectives(mode, hasRef, lockPose) {
     const lines = BACKGROUND_MODES[mode] || BACKGROUND_MODES.studio;
-    if (mode === 'keep') return lines.join('\n');
-    return lines.concat([
-      '  • Keep the person untouched: same pose, same head size and position in the frame,',
-      '    same neck, shoulders and clothing, same camera angle and focal length.',
+    // 레퍼런스도 스튜디오에서 찍힌 인물컷이라, 배경까지 통째로 끌어오는 사고가 있었다.
+    const noImport = hasRef
+      ? ['  • Do NOT import the reference image\'s background. Generate a fresh neutral backdrop;',
+         '    the reference is for hair only.']
+      : [];
+    if (mode === 'keep') return lines.concat(noImport).join('\n');
+    return lines.concat(noImport).concat([
+      lockPose
+        ? '  • Keep the person untouched: same pose, same head size and position in the frame,\n'
+          + '    same neck, shoulders and clothing, same camera angle and focal length as IMAGE 1.'
+        : '  • Same person, same clothing, same framing and distance from camera as IMAGE 1.',
       '  • HAIR EDGES: cut around the hair naturally — keep individual flyaway strands and the',
       '    soft silhouette. No hard cut-out outline, no white halo, no eroded or blurred edges.',
       '    The hair outline is what the customer is judging, so it must stay crisp and real.',
@@ -111,43 +121,114 @@ const LumainGen = (() => {
     ].filter(Boolean).join('\n');
   }
 
-  // ---- 얼굴 보존 프롬프트 ---------------------------------------
-  //  refs: { front:boolean, side:boolean } — 레퍼런스 사진을 함께 보낼 때
-  //  각 이미지가 무엇인지 번호로 알려줘야 모델이 얼굴/헤어를 헷갈리지 않는다.
-  function buildPrompt(styleCard, refs = {}) {
-    const hasFront = !!refs.front, hasSide = !!refs.side;
-    const sideNo = hasFront ? 3 : 2;
+  // ---- 마무리 보정(피부·자세) -----------------------------------
+  //  "얼굴을 바꾸지 마라" 와 정면충돌하는 지시라, 반드시 신원 보존이
+  //  우선이라는 걸 못박고 범위를 좁게 준다. 설정에서 끌 수 있다.
+  function finishingDirectives(refs) {
+    const skin = refs.skinCleanup !== 'none';
+    const pose = refs.posture === 'fix';
+    if (!skin && !pose) return [];
+    const out = [
+      'FINISHING — light retouching only (NEVER at the cost of identity):',
+      '  This is a minimal-edit job. Apply the smallest correction that removes an obvious',
+      '  flaw. When a correction is not clearly needed, do nothing.',
+    ];
+    if (skin) out.push(
+      '  • Skin: even out skin tone, calm redness, reduce oily shine and temporary blemishes.',
+      '    Keep natural skin texture and pores — no plastic smoothing, no airbrushed look.',
+      '    KEEP permanent features: moles, freckles, scars, dimples, wrinkles, facial hair.',
+      '    Do NOT change bone structure, facial proportions, eye/nose/mouth shape, or apparent age.',
+    );
+    if (pose) out.push(
+      '  • Posture: correct ONLY what looks clearly unnatural — a pronounced slouch, hunched or',
+      '    uneven shoulders, a noticeably tilted head, or a body twisted away from the camera.',
+      '    Nudge it toward a relaxed, upright, front-facing portrait using the smallest possible',
+      '    change. If the person is already reasonably upright, leave the pose exactly as it is.',
+      '    Do NOT restage the shot: keep the same head size and position in the frame, the same',
+      '    camera angle and distance, the same clothing and the same natural expression.',
+      '    Do not rotate the head to a new angle — a subtle straightening is the maximum.',
+    );
+    out.push(
+      '  If any of this would make the person look like someone else, do less. Identity wins.',
+      '',
+    );
+    return out;
+  }
 
-    const imageMap = ['INPUT IMAGES:', '  IMAGE 1 = the CUSTOMER photo. This is the photo you must edit.'];
-    if (hasFront) imageMap.push(`  IMAGE 2 = STYLE REFERENCE, front view. Copy the HAIRSTYLE from it.`);
-    if (hasSide) imageMap.push(`  IMAGE ${sideNo} = STYLE REFERENCE, side view. Use it for side/back length, the two-block line and the nape.`);
-    if (hasFront || hasSide) {
-      imageMap.push('  The reference model is NOT the customer. Take ONLY the hair from the reference —');
-      imageMap.push('  never the face, skin tone, body, clothing, background or camera angle.');
+  // ---- 얼굴 보존 프롬프트 ---------------------------------------
+  //  ★ 레퍼런스가 "완성된 인물 사진"이라 모델이 그쪽을 결과의 주인공으로 삼는
+  //    사고가 있었다. 그래서 얼굴 소유권을 문장 단위로 못박는다:
+  //      IMAGE 1(손님) = 결과에 남는 유일한 인물
+  //      IMAGE 2/3(견본) = 머리 모양 정보원일 뿐, 인물로 취급 금지
+  //  refs: { front, side, masked, background }
+  function buildPrompt(styleCard, opts = {}) {
+    // 호출부가 값을 안 주면 저장된 설정을 따른다 (외부에서 buildPrompt 만 부를 때 대비)
+    const refs = { ...getSettings(), ...opts };
+    const hasFront = !!refs.front, hasSide = !!refs.side;
+    const hasRef = hasFront || hasSide;
+    const frontNo = 'IMAGE 2', sideNo = hasFront ? 'IMAGE 3' : 'IMAGE 2';
+    const refList = [hasFront && frontNo, hasSide && sideNo].filter(Boolean).join(' and ');
+
+    const out = [
+      'You are a professional hair styling visualizer for a hair salon.',
+      '',
+      'TASK:',
+      `Take the person from IMAGE 1 and change ONLY their hair to match the hairstyle shown`,
+      `in ${hasRef ? refList : 'the style description below'}. Everything else about IMAGE 1's person stays identical.`,
+      "This is a hair-swap on IMAGE 1's photo, not a new portrait.",
+      '',
+      'IMAGE 1 — THE CUSTOMER (highest priority):',
+      'IMAGE 1 is the ONLY person in the final result. Preserve their face with 100% fidelity:',
+      'exact same facial features, bone structure, eyes, nose, mouth, eyebrows, skin tone,',
+      'face shape, and identity. The output must be unmistakably recognizable as the SAME',
+      'person in IMAGE 1. Do NOT beautify, slim, or alter their face in any way.',
+    ];
+
+    if (hasRef) {
+      out.push(
+        '',
+        `${refList} — HAIRSTYLE REFERENCE ONLY:`,
+        `${refList} ${hasFront && hasSide ? 'are' : 'is'} HAIRSTYLE REFERENCE ONLY. Use ${hasFront && hasSide ? 'them' : 'it'} EXCLUSIVELY to understand`,
+        "the hair shape, length, cut, and texture. COMPLETELY IGNORE the reference model's face,",
+        'skin, eyes, jaw, and identity. The reference person must NOT appear in the output in any',
+        'form. Do not blend, merge, or average the two faces.',
+        hasFront ? `  • ${frontNo} = front view — fringe, parting, overall silhouette.` : '',
+        hasSide ? `  • ${sideNo} = side view — side/back length, the two-block line, the nape.` : '',
+        refs.masked
+          ? "  • The reference model's face is deliberately blurred out. Do not reconstruct it, and"
+          : '',
+        refs.masked
+          ? '    do not copy that blur into the result — the customer\'s face stays sharp.'
+          : '',
+      );
     }
 
-    return [
-      'You are a professional hair styling visualizer for a hair salon.',
-      'Edit the CUSTOMER photo so the person wears a NEW hairstyle.',
+    out.push(
       '',
-      ...imageMap,
-      '',
-      'CRITICAL — FACE PRESERVATION (highest priority):',
-      "Preserve the customer's face EXACTLY — identical facial features, bone structure,",
-      'skin tone, eyes, nose, mouth, and expression. The face must remain the same person,',
-      'unmistakably recognizable. Do NOT beautify, slim, or alter the face in any way.',
-      '',
-      'CHANGE ONLY THE HAIR — cut, length, texture and styling:',
+      'THE HAIRSTYLE TO APPLY:',
       styleDirectives(styleCard),
       '',
-      'HAIR COLOR: keep the customer\'s original hair color. This is a CUT & PERM preview,',
+      "HAIR COLOR: keep the customer's original hair color. This is a CUT & PERM preview,",
       'not a dye preview — do not lighten, darken or tint the hair.',
       '',
-      backgroundDirectives(refs.background || getSettings().background),
+      ...finishingDirectives(refs),
+      backgroundDirectives(refs.background, hasRef, refs.posture !== 'fix'),
+      '',
+      'FORBIDDEN — the result is invalid if any of these happen:',
+      '  • The reference model appears in the output.',
+      '  • A second person, or any part of a second person, appears.',
+      '  • The two faces are blended, merged or averaged.',
+      "  • IMAGE 1's face is replaced, restyled, beautified, slimmed or aged.",
+      hasRef ? "  • The reference image's background, clothing or body is imported." : '',
+      "The customer's face is final.",
+      '',
+      'GUIDING PRINCIPLE: the only thing that should look obviously different from IMAGE 1',
+      'is the HAIR. Everything else changes as little as possible — and the face, not at all.',
       '',
       'Photorealistic salon result. Natural hairline and nape. Do not add text or watermark.',
-      'Return the edited image only.',
-    ].filter(Boolean).join('\n');
+      'Return one edited image only.',
+    );
+    return out.filter(Boolean).join('\n');
   }
 
   // ---- 유틸: 이미지 → base64 / 로드 ---------------------------
@@ -163,6 +244,52 @@ const LumainGen = (() => {
       img.onerror = rej;
       img.src = src;
     });
+  }
+
+  // ---- 레퍼런스 얼굴 지우기 --------------------------------------
+  //  프롬프트로 "견본 얼굴은 무시하라"고 백 번 써도, 완성된 인물 사진이 들어가면
+  //  모델이 그 얼굴을 결과의 주인공으로 삼는 사고가 난다. 아예 보내기 전에
+  //  얼굴 영역을 지워서 "복사할 얼굴 자체가 없게" 만든다. 머리카락은 건드리지 않는다.
+  //  좌표는 내장 카탈로그 구도 기준(정면=중앙, 측면=오른쪽 프로필).
+  const FACE_BOX = {
+    front: { cx: 0.50, cy: 0.50, rx: 0.21, ry: 0.19 },  // 눈까지 확실히 덮는다
+    side: { cx: 0.75, cy: 0.51, rx: 0.16, ry: 0.16 },   // 프로필은 오른쪽에 치우쳐 있다
+  };
+  async function blurReferenceFace(dataUrl, view) {
+    const box = FACE_BOX[view] || FACE_BOX.front;
+    const img = await loadImage(dataUrl);
+    const W = img.width, H = img.height;
+
+    // 1) 전체를 강하게 흐린 사본
+    const blurred = document.createElement('canvas');
+    blurred.width = W; blurred.height = H;
+    const bx = blurred.getContext('2d');
+    bx.filter = `blur(${Math.max(12, Math.round(W * 0.06))}px)`;
+    bx.drawImage(img, 0, 0);
+
+    // 2) 흐린 사본을 얼굴 타원으로 오려낸다. 가장자리는 페이드시켜
+    //    "붙여넣은 물체"처럼 보이지 않게 한다 (하드 엣지는 모델이 따라 그린다).
+    const patch = document.createElement('canvas');
+    patch.width = W; patch.height = H;
+    const px = patch.getContext('2d');
+    px.drawImage(blurred, 0, 0);
+    px.globalCompositeOperation = 'destination-in';
+    px.translate(W * box.cx, H * box.cy);
+    px.scale(W * box.rx, H * box.ry);          // 단위원 → 얼굴 타원
+    const g = px.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.70, 'rgba(0,0,0,1)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    px.fillStyle = g;
+    px.fillRect(-1, -1, 2, 2);
+
+    // 3) 원본 위에 합성
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(patch, 0, 0);
+    return cv.toDataURL('image/jpeg', 0.92);
   }
 
   // 스타일 카드 레퍼런스 사진(public/images/*.webp 또는 원장이 올린 dataURL)을
@@ -201,25 +328,43 @@ const LumainGen = (() => {
     const { mime, data } = stripDataUrl(faceDataUrl);
 
     // 스타일 카드의 정면/측면 모델컷을 함께 첨부한다 (있는 것만).
+    // 보내기 전에 견본 모델의 얼굴은 지운다 — 결과에 견본 얼굴이 나오는 사고 방지.
     onProgress && onProgress('ref-load');
+    const mask = s.maskRefFace !== false;
+    const prep = async (url, view) => {
+      if (!url) return null;
+      try {
+        return await toInlineData(mask ? await blurReferenceFace(url, view) : url);
+      } catch (e) {
+        console.warn('[LumainGen] 레퍼런스 얼굴 마스킹 실패 → 원본 사용:', e.message);
+        return await toInlineData(url);
+      }
+    };
     const [refFront, refSide] = await Promise.all([
-      toInlineData(styleCard.front_image || styleCard.image),
-      toInlineData(styleCard.side_image),
+      prep(styleCard.front_image || styleCard.image, 'front'),
+      prep(styleCard.side_image, 'side'),
     ]);
     onProgress && onProgress('gemini-request');
 
     // 이미지마다 바로 앞에 라벨 텍스트를 붙여 어떤 사진인지 명시.
-    const reqParts = [{ text: buildPrompt(styleCard, { front: !!refFront, side: !!refSide, background: s.background }) }];
-    reqParts.push({ text: '--- IMAGE 1 · CUSTOMER PHOTO (edit this one, keep this face) ---' });
+    const reqParts = [{ text: buildPrompt(styleCard, {
+      front: !!refFront, side: !!refSide, masked: mask,
+      background: s.background, skinCleanup: s.skinCleanup, posture: s.posture,
+    }) }];
+    reqParts.push({ text: '--- IMAGE 1 · THE CUSTOMER — this face must survive unchanged ---' });
     reqParts.push({ inlineData: { mimeType: mime, data } });
     if (refFront) {
-      reqParts.push({ text: '--- IMAGE 2 · STYLE REFERENCE, FRONT (hairstyle only, different person) ---' });
+      reqParts.push({ text: '--- IMAGE 2 · HAIRSTYLE REFERENCE, FRONT — hair shape only, NOT a person ---' });
       reqParts.push({ inlineData: refFront });
     }
     if (refSide) {
-      reqParts.push({ text: `--- IMAGE ${refFront ? 3 : 2} · STYLE REFERENCE, SIDE (side/back length, two-block line) ---` });
+      reqParts.push({ text: `--- IMAGE ${refFront ? 3 : 2} · HAIRSTYLE REFERENCE, SIDE — hair shape only, NOT a person ---` });
       reqParts.push({ inlineData: refSide });
     }
+    // 마지막 한마디. 이미지 뒤에 다시 못박아야 직전 이미지(견본)에 끌려가지 않는다.
+    if (refFront || refSide) reqParts.push({ text:
+      'REMINDER: the output must show the person from IMAGE 1 — same face, same identity — ' +
+      'wearing the hairstyle from the reference image(s). The reference model must not appear.' });
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.geminiKey)}`;
     const body = {
