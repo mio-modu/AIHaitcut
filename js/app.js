@@ -612,16 +612,19 @@
             직접 올린 카드에서 머리가 가려지는 경우에만 끄세요.</div></div>
         <div class="field" style="margin-top:14px"><label>피부 보정</label>
           <select id="setSkin">
-            <option value="light"${s.skinCleanup !== 'none' ? ' selected' : ''}>가볍게 정리 — 톤·유분·잡티 (권장)</option>
-            <option value="none"${s.skinCleanup === 'none' ? ' selected' : ''}>원본 그대로</option>
-          </select></div>
+            <option value="minimal"${s.skinCleanup !== 'none' ? ' selected' : ''}>아주 약하게 — 조명 얼룩·번들거림만 (권장)</option>
+            <option value="none"${s.skinCleanup === 'none' ? ' selected' : ''}>끄기 — 원본 그대로</option>
+          </select>
+          <div class="purge-note" style="margin-top:8px">잡티 제거·미백·주름 완화·갸름·동안 효과는 <b>전부 금지</b>로 지시됩니다.
+            피부가 지저분해 보이지 않을 만큼만 손봅니다.</div></div>
         <div class="field" style="margin-top:14px"><label>자세 교정</label>
           <select id="setPose">
-            <option value="fix"${s.posture !== 'keep' ? ' selected' : ''}>정면·바른 자세로 교정 (권장)</option>
-            <option value="keep"${s.posture === 'keep' ? ' selected' : ''}>원본 자세 유지</option>
+            <option value="keep"${s.posture !== 'fix' ? ' selected' : ''}>원본 각도 그대로 (권장)</option>
+            <option value="fix"${s.posture === 'fix' ? ' selected' : ''}>아주 약하게 교정</option>
           </select>
-          <div class="purge-note" style="margin-top:8px">보정은 <b>얼굴 동일성보다 우선하지 않도록</b> 지시됩니다.
-            그래도 인물이 달라 보이면 두 항목을 "원본"으로 두세요.</div></div>
+          <div class="purge-note" style="margin-top:8px;color:var(--danger);border-color:rgba(255,90,110,.3)">
+            ⚠ 얼굴 각도가 바뀌면 <b style="color:var(--danger)">딴사람으로 보입니다.</b>
+            기본값(원본 각도 그대로)을 권장합니다.</div></div>
         <div class="purge-note" style="margin-top:16px;color:var(--danger);border-color:rgba(255,90,110,.3)">
           ⚠ <b style="color:var(--danger)">보안:</b> 지금은 단일 웹앱이라 키가 이 브라우저에 저장됩니다.
           원장님 <b style="color:var(--danger)">본인 태블릿 1대</b>에서만 쓰세요. 손님/직원에게 여는 단계엔 백엔드(2단계)로 옮겨야 합니다.</div>

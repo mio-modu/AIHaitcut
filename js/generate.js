@@ -23,8 +23,10 @@ const LumainGen = (() => {
     faceGuard: true,                    // 얼굴 유사도 경고 사용
     background: 'studio',               // 'studio' | 'white' | 'keep' — 누끼 처리 방식
     maskRefFace: true,                  // 견본 모델 얼굴을 지우고 전송 (결과에 견본 얼굴 방지)
-    skinCleanup: 'light',               // 'light' | 'none' — 피부 톤 정리
-    posture: 'fix',                     // 'fix' | 'keep' — 정면 바른 자세로 교정
+    // ★ 보정은 정체성을 갉아먹는다. 실제로 "얼굴이 어려지고 갸름해져 딴사람"이 되는
+    //   사고가 났다. 그래서 피부만 아주 약하게, 자세 교정은 기본 해제로 되돌렸다.
+    skinCleanup: 'minimal',             // 'minimal' | 'none' — 조명 얼룩·번들거림만
+    posture: 'keep',                    // 'keep' | 'fix' — 기본은 원본 각도 유지
   };
 
   // 이미 설정을 저장한 브라우저는 옛 모델명이 localStorage 에 박혀 있어
@@ -42,6 +44,24 @@ const LumainGen = (() => {
         console.info('[LumainGen] 모델을 ' + DEFAULTS.model + ' 로 갱신');
       }
       localStorage.setItem(MODEL_MIGRATED_KEY, '1');
+    } catch {}
+  }
+
+  // 보정 과다로 인물이 바뀌는 사고가 있었다. 이미 저장된 설정에는 옛 값
+  // (posture:'fix', skinCleanup:'light')이 그대로 남아 있으므로 1회 되돌린다.
+  const RETOUCH_MIGRATED_KEY = 'lumain_retouch_reset_v1';
+  function migrateRetouch() {
+    try {
+      if (localStorage.getItem(RETOUCH_MIGRATED_KEY)) return;
+      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      let changed = false;
+      if (raw.posture === 'fix') { raw.posture = 'keep'; changed = true; }
+      if (raw.skinCleanup === 'light') { raw.skinCleanup = 'minimal'; changed = true; }
+      if (changed) {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(raw));
+        console.info('[LumainGen] 보정 설정을 약하게 되돌림 (정체성 보존 우선)');
+      }
+      localStorage.setItem(RETOUCH_MIGRATED_KEY, '1');
     } catch {}
   }
 
@@ -127,29 +147,38 @@ const LumainGen = (() => {
   function finishingDirectives(refs) {
     const skin = refs.skinCleanup !== 'none';
     const pose = refs.posture === 'fix';
-    if (!skin && !pose) return [];
-    const out = [
-      'FINISHING — light retouching only (NEVER at the cost of identity):',
-      '  This is a minimal-edit job. Apply the smallest correction that removes an obvious',
-      '  flaw. When a correction is not clearly needed, do nothing.',
-    ];
+    const out = [];   // 각도 잠금은 피부 보정을 꺼도 항상 나가야 한다
+
+    // 얼굴 각도는 정체성 그 자체다. 각도가 바뀌면 사람이 바뀐 것처럼 보인다.
+    if (!pose) out.push(
+      'POSE & ANGLE — locked:',
+      "  Keep the customer's pose and camera angle EXACTLY as in IMAGE 1 — same head angle,",
+      '  same head tilt, same gaze direction, same shoulders, same framing and distance.',
+      '  Do NOT straighten, re-orient, level or re-stage anything. Do not correct a tilt.',
+      '  Changing the face angle makes it look like a different person. Leave it alone.',
+      '',
+    );
+    else out.push(
+      'POSE — very light correction only:',
+      '  Only if the person is severely slouched, nudge the shoulders upright by the smallest',
+      "  possible amount. Do NOT change the head angle, head tilt or gaze — those are identity.",
+      '  Same framing, same distance, same clothing, same expression.',
+      '',
+    );
+
     if (skin) out.push(
-      '  • Skin: even out skin tone, calm redness, reduce oily shine and temporary blemishes.',
-      '    Keep natural skin texture and pores — no plastic smoothing, no airbrushed look.',
-      '    KEEP permanent features: moles, freckles, scars, dimples, wrinkles, facial hair.',
-      '    Do NOT change bone structure, facial proportions, eye/nose/mouth shape, or apparent age.',
-    );
-    if (pose) out.push(
-      '  • Posture: correct ONLY what looks clearly unnatural — a pronounced slouch, hunched or',
-      '    uneven shoulders, a noticeably tilted head, or a body twisted away from the camera.',
-      '    Nudge it toward a relaxed, upright, front-facing portrait using the smallest possible',
-      '    change. If the person is already reasonably upright, leave the pose exactly as it is.',
-      '    Do NOT restage the shot: keep the same head size and position in the frame, the same',
-      '    camera angle and distance, the same clothing and the same natural expression.',
-      '    Do not rotate the head to a new angle — a subtle straightening is the maximum.',
-    );
-    out.push(
-      '  If any of this would make the person look like someone else, do less. Identity wins.',
+      'SKIN — the ONLY retouching allowed, and it must stay almost invisible:',
+      '  ALLOWED (very slight, so the skin does not look dirty or blotchy):',
+      '    • Even out uneven, patchy shadows caused by the room lighting.',
+      '    • Take down harsh specular oily shine on the forehead and nose a little.',
+      '  FORBIDDEN — every one of these makes it a different person:',
+      '    • Removing blemishes, spots, acne, moles or freckles.',
+      '    • Whitening or brightening the skin. Changing skin tone.',
+      '    • Softening or erasing wrinkles, lines or eye bags.',
+      '    • Smoothing pores or skin texture. Any beauty-app / retouch-filter look.',
+      '    • Slimming the face or jaw. Enlarging eyes. Making the person look younger.',
+      '  Keep the real age and the real face exactly as photographed. Skin texture stays.',
+      '  If you are unsure whether a change is allowed, do nothing.',
       '',
     );
     return out;
@@ -170,6 +199,13 @@ const LumainGen = (() => {
     const refList = [hasFront && frontNo, hasSide && sideNo].filter(Boolean).join(' and ');
 
     const out = [
+      // ★ 최상단 고정. 아래 어떤 지시와 충돌해도 이 블록이 이긴다.
+      'CRITICAL — FACE IDENTITY LOCK (this overrides every other instruction below):',
+      'The output face MUST be the exact same person as the customer photo. Same age,',
+      'same face shape, same skin, same wrinkles, same features. Do NOT beautify, slim,',
+      'smooth, or youthify. If the result looks like a different or younger person, it is',
+      'a FAILURE. Only the HAIR changes. Everything about the face and identity stays 100% as-is.',
+      '',
       'You are a professional hair styling visualizer for a hair salon.',
       '',
       'TASK:',
@@ -219,6 +255,8 @@ const LumainGen = (() => {
       '  • A second person, or any part of a second person, appears.',
       '  • The two faces are blended, merged or averaged.',
       "  • IMAGE 1's face is replaced, restyled, beautified, slimmed or aged.",
+      '  • The person looks YOUNGER, slimmer, smoother-skinned or more "perfect" than IMAGE 1.',
+      '  • The face angle, head tilt or gaze direction differs from IMAGE 1.',
       hasRef ? "  • The reference image's background, clothing or body is imported." : '',
       "The customer's face is final.",
       '',
@@ -362,9 +400,13 @@ const LumainGen = (() => {
       reqParts.push({ inlineData: refSide });
     }
     // 마지막 한마디. 이미지 뒤에 다시 못박아야 직전 이미지(견본)에 끌려가지 않는다.
-    if (refFront || refSide) reqParts.push({ text:
-      'REMINDER: the output must show the person from IMAGE 1 — same face, same identity — ' +
-      'wearing the hairstyle from the reference image(s). The reference model must not appear.' });
+    reqParts.push({ text:
+      'FINAL CHECK before you output: the face must be the SAME PERSON as IMAGE 1 — same age, ' +
+      'same face shape, same skin and wrinkles, same angle and tilt. Not younger, not slimmer, ' +
+      'not smoothed.' +
+      (refFront || refSide
+        ? ' The reference model must not appear. Only the HAIRSTYLE comes from the reference.'
+        : ' Only the HAIR changes.') });
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.geminiKey)}`;
     const body = {
@@ -587,6 +629,7 @@ const LumainGen = (() => {
   }
 
   migrateModel();
+  migrateRetouch();
 
   return { generatePreview, getSettings, saveSettings, usingGemini, buildPrompt, DEFAULTS };
 })();
