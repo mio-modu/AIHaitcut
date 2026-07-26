@@ -563,6 +563,13 @@
     bd.onclick = e => { if (e.target === bd) bd.remove(); };
   }
 
+  // 이미지 편집 모델 프리셋 (2026-07 기준 이미지 1장 단가)
+  const MODEL_PRESETS = [
+    { id: 'gemini-3.1-flash-lite-image', label: '나노바나나 2 라이트 · $0.0336 — 가장 저렴·빠름 (권장)' },
+    { id: 'gemini-3.1-flash-image', label: '나노바나나 2 · $0.067 — 품질 우선' },
+    { id: 'gemini-2.5-flash-image', label: '2.5 플래시 이미지 · $0.039 — 구버전' },
+  ];
+
   function openSettings() {
     const s = LumainGen.getSettings();
     const bd = div('modal-backdrop');
@@ -579,8 +586,22 @@
           </select></div>
         <div class="field" style="margin-top:14px"><label>Gemini API 키</label>
           <input id="setKey" type="password" value="${escapeAttr(s.geminiKey)}" placeholder="AIza..."></div>
-        <div class="field" style="margin-top:14px"><label>모델명</label>
-          <input id="setModel" value="${escapeAttr(s.model)}" placeholder="gemini-2.5-flash-image"></div>
+        <div class="field" style="margin-top:14px"><label>모델</label>
+          <select id="setModelPick">
+            ${MODEL_PRESETS.map(m => `<option value="${m.id}"${s.model === m.id ? ' selected' : ''}>${m.label}</option>`).join('')}
+            <option value="__custom"${MODEL_PRESETS.some(m => m.id === s.model) ? '' : ' selected'}>직접 입력</option>
+          </select>
+          <input id="setModel" style="margin-top:8px" value="${escapeAttr(s.model)}" placeholder="gemini-3.1-flash-lite-image">
+          <div class="purge-note" style="margin-top:8px">단가는 이미지 1장 기준입니다. 라이트가 가장 싸고 빠르지만,
+            얼굴 보존이 흔들리면 <b>나노바나나 2</b>로 올려보세요.</div></div>
+        <div class="field" style="margin-top:14px"><label>결과 배경 (누끼)</label>
+          <select id="setBg">
+            <option value="studio"${s.background==='studio'?' selected':''}>스튜디오 라이트 그레이 — 배경 정리 (권장)</option>
+            <option value="white"${s.background==='white'?' selected':''}>순백 누끼 — 완전 흰 배경</option>
+            <option value="keep"${s.background==='keep'?' selected':''}>원본 배경 유지</option>
+          </select>
+          <div class="purge-note" style="margin-top:8px">매장 내부가 그대로 찍히는 걸 막고 머리 모양에 시선이 가게 합니다.
+            순백은 밝은 모발 끝이 배경에 묻힐 수 있어, 잔머리 경계는 <b>스튜디오 그레이</b>가 더 잘 살아납니다.</div></div>
         <div class="purge-note" style="margin-top:16px;color:var(--danger);border-color:rgba(255,90,110,.3)">
           ⚠ <b style="color:var(--danger)">보안:</b> 지금은 단일 웹앱이라 키가 이 브라우저에 저장됩니다.
           원장님 <b style="color:var(--danger)">본인 태블릿 1대</b>에서만 쓰세요. 손님/직원에게 여는 단계엔 백엔드(2단계)로 옮겨야 합니다.</div>
@@ -592,10 +613,20 @@
     document.body.appendChild(bd);
     $('#setCancel', bd).onclick = () => bd.remove();
     bd.onclick = e => { if (e.target === bd) bd.remove(); };
+    // 프리셋을 고르면 입력칸을 채워준다. "직접 입력"이면 입력칸만 쓴다.
+    const pick = $('#setModelPick', bd), modelInput = $('#setModel', bd);
+    const syncModelInput = () => {
+      const custom = pick.value === '__custom';
+      modelInput.style.display = custom ? '' : 'none';
+      if (!custom) modelInput.value = pick.value;
+    };
+    pick.onchange = syncModelInput;
+    syncModelInput();
     $('#setSave', bd).onclick = () => {
       LumainGen.saveSettings({
         mode: $('#setMode', bd).value, geminiKey: $('#setKey', bd).value.trim(),
-        model: $('#setModel', bd).value.trim() || 'gemini-2.5-flash-image', faceGuard: true,
+        model: modelInput.value.trim() || LumainGen.DEFAULTS.model, faceGuard: true,
+        background: $('#setBg', bd).value,
       });
       bd.remove(); toast('설정을 저장했습니다.'); renderStudio();
     };

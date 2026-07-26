@@ -15,9 +15,32 @@ const LumainGen = (() => {
   const DEFAULTS = {
     mode: 'auto',                       // 'auto' | 'demo' | 'gemini'
     geminiKey: '',                      // 원장이 입력. 브라우저 저장(1단계 한정)
-    model: 'gemini-2.5-flash-image',    // Gemini 이미지 편집 모델(=Nano Banana 계열)
+    // 이미지 편집 모델. 2026-07 기준 이미지당 단가:
+    //   gemini-3.1-flash-lite-image  $0.0336  (나노바나나 2 라이트, 가장 저렴·빠름) ← 기본
+    //   gemini-3.1-flash-image       $0.067   (나노바나나 2, 품질 우선)
+    //   gemini-2.5-flash-image       $0.039   (구 기본값)
+    model: 'gemini-3.1-flash-lite-image',
     faceGuard: true,                    // 얼굴 유사도 경고 사용
+    background: 'studio',               // 'studio' | 'white' | 'keep' — 누끼 처리 방식
   };
+
+  // 이미 설정을 저장한 브라우저는 옛 모델명이 localStorage 에 박혀 있어
+  // DEFAULTS 를 바꿔도 반영되지 않는다. "예전 기본값 그대로인 경우"만 1회 올려준다.
+  // (원장이 직접 고른 모델명은 건드리지 않도록 플래그로 1회만 실행)
+  const LEGACY_MODELS = ['gemini-2.5-flash-image'];
+  const MODEL_MIGRATED_KEY = 'lumain_model_migrated_v3';
+  function migrateModel() {
+    try {
+      if (localStorage.getItem(MODEL_MIGRATED_KEY)) return;
+      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      if (raw.model && LEGACY_MODELS.includes(raw.model)) {
+        raw.model = DEFAULTS.model;
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(raw));
+        console.info('[LumainGen] 모델을 ' + DEFAULTS.model + ' 로 갱신');
+      }
+      localStorage.setItem(MODEL_MIGRATED_KEY, '1');
+    } catch {}
+  }
 
   function getSettings() {
     try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
@@ -34,6 +57,38 @@ const LumainGen = (() => {
     if (s.mode === 'demo') return false;
     if (s.mode === 'gemini') return true;
     return !!s.geminiKey; // auto: 키가 있으면 실연동
+  }
+
+  // ---- 배경(누끼) 지시문 ----------------------------------------
+  //  머리 모양을 보는 컷이므로 배경이 산만하면 안 된다. 다만 하드 누끼는
+  //  잔머리 경계가 톱니처럼 깨지고 흰 테두리(할로)가 생기기 쉬우므로,
+  //  "배경을 갈아끼우되 인물은 그대로" 를 명시하고 모발 경계를 따로 못박는다.
+  const BACKGROUND_MODES = {
+    studio: [
+      'BACKGROUND — replace it with a clean salon studio backdrop:',
+      '  • Seamless, evenly lit light-gray backdrop (soft vertical gradient, slightly',
+      '    brighter behind the head). No props, no furniture, no texture, no shadows on the wall.',
+      '  • Remove everything from the original background — people, mirrors, signage, clutter.',
+      '  • Relight the subject subtly so they look genuinely photographed against that backdrop.',
+    ],
+    white: [
+      'BACKGROUND — replace it with pure white (#FFFFFF):',
+      '  • Completely flat, seamless white. No gradient, no shadow, no floor line, no vignette.',
+      '  • Remove everything from the original background.',
+      '  • Keep the subject properly exposed — do not blow out skin or light hair into the white.',
+    ],
+    keep: ['BACKGROUND: keep the original background, lighting and camera angle unchanged.'],
+  };
+  function backgroundDirectives(mode) {
+    const lines = BACKGROUND_MODES[mode] || BACKGROUND_MODES.studio;
+    if (mode === 'keep') return lines.join('\n');
+    return lines.concat([
+      '  • Keep the person untouched: same pose, same head size and position in the frame,',
+      '    same neck, shoulders and clothing, same camera angle and focal length.',
+      '  • HAIR EDGES: cut around the hair naturally — keep individual flyaway strands and the',
+      '    soft silhouette. No hard cut-out outline, no white halo, no eroded or blurred edges.',
+      '    The hair outline is what the customer is judging, so it must stay crisp and real.',
+    ]).join('\n');
   }
 
   // ---- 스타일 지시문 -------------------------------------------
@@ -88,7 +143,8 @@ const LumainGen = (() => {
       'HAIR COLOR: keep the customer\'s original hair color. This is a CUT & PERM preview,',
       'not a dye preview — do not lighten, darken or tint the hair.',
       '',
-      'Keep neck, shoulders, clothing, background, lighting and camera angle the same as the original.',
+      backgroundDirectives(refs.background || getSettings().background),
+      '',
       'Photorealistic salon result. Natural hairline and nape. Do not add text or watermark.',
       'Return the edited image only.',
     ].filter(Boolean).join('\n');
@@ -153,7 +209,7 @@ const LumainGen = (() => {
     onProgress && onProgress('gemini-request');
 
     // 이미지마다 바로 앞에 라벨 텍스트를 붙여 어떤 사진인지 명시.
-    const reqParts = [{ text: buildPrompt(styleCard, { front: !!refFront, side: !!refSide }) }];
+    const reqParts = [{ text: buildPrompt(styleCard, { front: !!refFront, side: !!refSide, background: s.background }) }];
     reqParts.push({ text: '--- IMAGE 1 · CUSTOMER PHOTO (edit this one, keep this face) ---' });
     reqParts.push({ inlineData: { mimeType: mime, data } });
     if (refFront) {
@@ -261,6 +317,13 @@ const LumainGen = (() => {
     ctx.fillStyle = 'rgba(238,241,245,.92)';
     ctx.font = '600 20px Pretendard, "Noto Sans KR"';
     ctx.fillText(styleCard.name_ko || styleCard.name || '', 18, 58);
+    // 배경 정리(누끼)는 실제 생성에서만 된다. 데모는 원본 배경 그대로이므로
+    // "누끼가 안 먹혔다"는 오해가 없게 화면에 적어둔다.
+    if (getSettings().background !== 'keep') {
+      ctx.fillStyle = 'rgba(238,241,245,.6)';
+      ctx.font = '500 13px Pretendard, "Noto Sans KR"';
+      ctx.fillText('배경 정리(누끼)는 Gemini 키 연결 시 적용됩니다', 18, 82);
+    }
 
     return cv.toDataURL('image/jpeg', 0.92);
   }
@@ -378,5 +441,7 @@ const LumainGen = (() => {
     ctx.closePath();
   }
 
-  return { generatePreview, getSettings, saveSettings, usingGemini, buildPrompt };
+  migrateModel();
+
+  return { generatePreview, getSettings, saveSettings, usingGemini, buildPrompt, DEFAULTS };
 })();
