@@ -36,29 +36,62 @@ const LumainGen = (() => {
     return !!s.geminiKey; // auto: 키가 있으면 실연동
   }
 
-  // ---- 얼굴 보존 프롬프트 (기획서 명세 그대로) -----------------
-  function buildPrompt(styleCard) {
+  // ---- 스타일 지시문 -------------------------------------------
+  //  스타일 카드의 prompt_params(cut / top / finish / keywords)를 그대로 싣는다.
+  //  prompt_params 가 없는 커스텀 카드는 태그·설명으로 대체된다.
+  function styleDirectives(styleCard) {
+    const p = styleCard.prompt_params || {};
     const t = styleCard.tags || {};
-    const parts = [
+    const title = [styleCard.name_ko || styleCard.name, styleCard.name_en]
+      .filter(Boolean).join(' / ');
+    return [
+      `  • Style name: ${title}`,
+      t.length ? `  • Overall length: ${t.length}` : '',
+      t.perm && t.perm !== '없음' ? `  • Perm / texture: ${t.perm}` : '',
+      p.cut ? `  • Cut & silhouette: ${p.cut}` : '',
+      p.top ? `  • Top & fringe: ${p.top}` : '',
+      p.finish ? `  • Finish & mood: ${p.finish}` : '',
+      (p.keywords && p.keywords.length) ? `  • Keywords: ${p.keywords.join(', ')}` : '',
+      (styleCard.desc && styleCard.desc !== styleCard.name_en) ? `  • Notes: ${styleCard.desc}` : '',
+    ].filter(Boolean).join('\n');
+  }
+
+  // ---- 얼굴 보존 프롬프트 ---------------------------------------
+  //  refs: { front:boolean, side:boolean } — 레퍼런스 사진을 함께 보낼 때
+  //  각 이미지가 무엇인지 번호로 알려줘야 모델이 얼굴/헤어를 헷갈리지 않는다.
+  function buildPrompt(styleCard, refs = {}) {
+    const hasFront = !!refs.front, hasSide = !!refs.side;
+    const sideNo = hasFront ? 3 : 2;
+
+    const imageMap = ['INPUT IMAGES:', '  IMAGE 1 = the CUSTOMER photo. This is the photo you must edit.'];
+    if (hasFront) imageMap.push(`  IMAGE 2 = STYLE REFERENCE, front view. Copy the HAIRSTYLE from it.`);
+    if (hasSide) imageMap.push(`  IMAGE ${sideNo} = STYLE REFERENCE, side view. Use it for side/back length, the two-block line and the nape.`);
+    if (hasFront || hasSide) {
+      imageMap.push('  The reference model is NOT the customer. Take ONLY the hair from the reference —');
+      imageMap.push('  never the face, skin tone, body, clothing, background or camera angle.');
+    }
+
+    return [
       'You are a professional hair styling visualizer for a hair salon.',
-      'Edit the given photo of a person to show a NEW hairstyle.',
+      'Edit the CUSTOMER photo so the person wears a NEW hairstyle.',
+      '',
+      ...imageMap,
       '',
       'CRITICAL — FACE PRESERVATION (highest priority):',
-      "Preserve the person's face EXACTLY — identical facial features, bone structure,",
+      "Preserve the customer's face EXACTLY — identical facial features, bone structure,",
       'skin tone, eyes, nose, mouth, and expression. The face must remain the same person,',
       'unmistakably recognizable. Do NOT beautify, slim, or alter the face in any way.',
       '',
-      'CHANGE ONLY THE HAIR — cut, length, color, and style:',
-      `  • Style name: ${styleCard.name}`,
-      t.length ? `  • Length: ${t.length}` : '',
-      t.color ? `  • Color: ${t.color}` : '',
-      t.perm ? `  • Texture / perm: ${t.perm}` : '',
-      styleCard.desc ? `  • Notes: ${styleCard.desc}` : '',
+      'CHANGE ONLY THE HAIR — cut, length, texture and styling:',
+      styleDirectives(styleCard),
+      '',
+      'HAIR COLOR: keep the customer\'s original hair color. This is a CUT & PERM preview,',
+      'not a dye preview — do not lighten, darken or tint the hair.',
       '',
       'Keep neck, shoulders, clothing, background, lighting and camera angle the same as the original.',
-      'Photorealistic salon result. Natural hairline. Do not add text or watermark.',
-    ];
-    return parts.filter(Boolean).join('\n');
+      'Photorealistic salon result. Natural hairline and nape. Do not add text or watermark.',
+      'Return the edited image only.',
+    ].filter(Boolean).join('\n');
   }
 
   // ---- 유틸: 이미지 → base64 / 로드 ---------------------------
@@ -76,6 +109,32 @@ const LumainGen = (() => {
     });
   }
 
+  // 스타일 카드 레퍼런스 사진(public/images/*.webp 또는 원장이 올린 dataURL)을
+  // Gemini inlineData 형식으로 변환. 실패하면 null → 텍스트 지시문만으로 진행.
+  async function toInlineData(url) {
+    if (!url) return null;
+    try {
+      if (url.startsWith('data:')) {
+        const { mime, data } = stripDataUrl(url);
+        return { mimeType: mime, data };
+      }
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      const dataUrl = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result); fr.onerror = rej;
+        fr.readAsDataURL(blob);
+      });
+      const { mime, data } = stripDataUrl(dataUrl);
+      return { mimeType: mime, data };
+    } catch (e) {
+      // file:// 로 직접 열었거나 경로가 없을 때. 흐름은 끊지 않는다.
+      console.warn('[LumainGen] 레퍼런스 이미지 로드 실패 → 텍스트 지시문만 사용:', url, e.message);
+      return null;
+    }
+  }
+
   // =========================================================
   //  (A) 실제 Gemini 호출
   //  2단계에서 이 함수 본문을 fetch('/api/generate', ...) 로 바꾸면
@@ -84,17 +143,31 @@ const LumainGen = (() => {
   async function callGemini(faceDataUrl, styleCard, onProgress) {
     const s = getSettings();
     const { mime, data } = stripDataUrl(faceDataUrl);
+
+    // 스타일 카드의 정면/측면 모델컷을 함께 첨부한다 (있는 것만).
+    onProgress && onProgress('ref-load');
+    const [refFront, refSide] = await Promise.all([
+      toInlineData(styleCard.front_image || styleCard.image),
+      toInlineData(styleCard.side_image),
+    ]);
     onProgress && onProgress('gemini-request');
+
+    // 이미지마다 바로 앞에 라벨 텍스트를 붙여 어떤 사진인지 명시.
+    const reqParts = [{ text: buildPrompt(styleCard, { front: !!refFront, side: !!refSide }) }];
+    reqParts.push({ text: '--- IMAGE 1 · CUSTOMER PHOTO (edit this one, keep this face) ---' });
+    reqParts.push({ inlineData: { mimeType: mime, data } });
+    if (refFront) {
+      reqParts.push({ text: '--- IMAGE 2 · STYLE REFERENCE, FRONT (hairstyle only, different person) ---' });
+      reqParts.push({ inlineData: refFront });
+    }
+    if (refSide) {
+      reqParts.push({ text: `--- IMAGE ${refFront ? 3 : 2} · STYLE REFERENCE, SIDE (side/back length, two-block line) ---` });
+      reqParts.push({ inlineData: refSide });
+    }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent?key=${encodeURIComponent(s.geminiKey)}`;
     const body = {
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: buildPrompt(styleCard) },
-          { inlineData: { mimeType: mime, data } },
-        ],
-      }],
+      contents: [{ role: 'user', parts: reqParts }],
       generationConfig: { responseModalities: ['IMAGE', 'TEXT'], temperature: 0.4 },
     };
 
@@ -137,8 +210,9 @@ const LumainGen = (() => {
     // 원본
     ctx.drawImage(img, 0, 0, W, H);
 
-    // 스타일 톤 오버레이 (컬러 태그 기반)
-    const tint = colorForTag(styleCard.tags?.color);
+    // 스타일 톤 오버레이 — 컬러 태그가 없는 남성 카탈로그이므로
+    // 스타일 id 로 톤을 갈라 4종이 서로 구분되게 한다. (데모 전용 연출)
+    const tint = toneForStyle(styleCard);
     ctx.globalCompositeOperation = 'soft-light';
     ctx.fillStyle = tint;
     ctx.globalAlpha = 0.5;
@@ -153,12 +227,18 @@ const LumainGen = (() => {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H * 0.45);
 
-    // 스타일 카드 참조 썸네일 (우상단)
-    if (styleCard.image) {
+    // 스타일 카드 참조 썸네일 — 정면/측면 두 장을 우측에 세로로 얹는다.
+    const refs = [
+      { src: styleCard.front_image || styleCard.image, label: '정면' },
+      { src: styleCard.side_image, label: '측면' },
+    ].filter(r => r.src);
+    let ry = 18;
+    const rw = W * 0.22;
+    for (const r of refs) {
       try {
-        const ref = await loadImage(styleCard.image);
-        const rw = W * 0.24, rh = rw * (ref.height / ref.width || 1.33);
-        const rx = W - rw - 18, ry = 18;
+        const ref = await loadImage(r.src);
+        const rh = rw * (ref.height / ref.width || 1.33);
+        const rx = W - rw - 18;
         ctx.save();
         roundRect(ctx, rx, ry, rw, rh, 0); ctx.clip();
         ctx.drawImage(ref, rx, ry, rw, rh);
@@ -166,16 +246,21 @@ const LumainGen = (() => {
         ctx.strokeStyle = 'rgba(78,168,255,.9)'; ctx.lineWidth = 2;
         roundRect(ctx, rx, ry, rw, rh, 0); ctx.stroke();
         ctx.fillStyle = 'rgba(0,0,0,.6)';
-        ctx.fillRect(rx, ry + rh - 26, rw, 26);
+        ctx.fillRect(rx, ry + rh - 24, rw, 24);
         ctx.fillStyle = '#7CC4FF'; ctx.font = '500 12px Pretendard, "Noto Sans KR"'; ctx.textAlign = 'center';
-        ctx.fillText('선택 스타일', rx + rw / 2, ry + rh - 8);
+        ctx.fillText(r.label, rx + rw / 2, ry + rh - 7);
+        ry += rh + 10;
       } catch {}
     }
 
-    // 데모 표식
+    // 데모 표식 + 스타일명 (4종이 눈으로 구분되도록)
+    ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(124,196,255,.95)';
-    ctx.font = '700 15px Pretendard, "Noto Sans KR"'; ctx.textAlign = 'left';
+    ctx.font = '700 15px Pretendard, "Noto Sans KR"';
     ctx.fillText('DEMO · 실제 AI 생성 아님', 18, 30);
+    ctx.fillStyle = 'rgba(238,241,245,.92)';
+    ctx.font = '600 20px Pretendard, "Noto Sans KR"';
+    ctx.fillText(styleCard.name_ko || styleCard.name || '', 18, 58);
 
     return cv.toDataURL('image/jpeg', 0.92);
   }
@@ -270,13 +355,14 @@ const LumainGen = (() => {
   }
 
   // ---- 색상 헬퍼 -------------------------------------------
-  function colorForTag(color) {
-    const map = {
-      '애쉬 브라운': '#7c6a53', '애쉬 그레이': '#8a8a90', '블랙': '#2b2b30',
-      '다크 브라운': '#4a382a', '내추럴 브라운': '#6b4f37', '레드 브라운': '#7a4436',
-      '밀크 브라운': '#9a7a5a', '블론드': '#c9a86a', '핑크': '#c98a97', '블루블랙': '#2a2f3a',
-    };
-    return map[color] || '#6b4f37';
+  //  데모 전용 톤. 남성 카탈로그엔 컬러 태그가 없으므로 스타일 id 해시로
+  //  차분한 무채/브라운 계열 중 하나를 고정 배정한다(같은 카드=항상 같은 톤).
+  const DEMO_TONES = ['#5b4a3a', '#4a4f58', '#6b5a48', '#3f4650', '#7a6a55', '#4d4438'];
+  function toneForStyle(styleCard) {
+    const key = String(styleCard.id || styleCard.name || '');
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+    return DEMO_TONES[Math.abs(h) % DEMO_TONES.length];
   }
   function applyAlpha(hex, a) {
     const n = parseInt(hex.slice(1), 16);

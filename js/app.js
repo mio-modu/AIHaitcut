@@ -56,7 +56,7 @@
 
     // 메뉴 그리드
     const grid = $('#menuGrid');
-    const cards = LumainData.listCards();
+    const cards = LumainData.listCards({ gender: 'male' });   // 지금은 남성 위주
     if (!cards.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="ico">✂</div>
         스타일 카드가 없습니다.<br>상단 "스타일 관리"에서 등록하세요.</div>`;
@@ -381,7 +381,13 @@
       const grid = $('#smGrid', bd); grid.innerHTML = '';
       const cards = LumainData.listCards();
       if (!cards.length) grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="ico">✂</div>등록된 카드가 없습니다.</div>`;
-      cards.forEach(c => { const el = styleCardEl(c); el.onclick = () => openCardModal(c, paint); grid.appendChild(el); });
+      cards.forEach(c => {
+        const el = styleCardEl(c);
+        const builtin = LumainData.isBuiltin(c.id);
+        if (builtin) el.classList.add('is-builtin');
+        el.onclick = () => (builtin ? openBuiltinCardModal : openCardModal)(c, paint);
+        grid.appendChild(el);
+      });
     };
     paint();
     $('#smAdd', bd).onclick = () => openCardModal(null, paint);
@@ -389,21 +395,90 @@
     bd.onclick = e => { if (e.target === bd) { bd.remove(); renderStudio(); } };
   }
 
-  function openCardModal(card, after) {
-    const isEdit = !!card;
-    const data = card ? JSON.parse(JSON.stringify(card)) : { name: '', desc: '', image: '', tags: {} };
+  // 내장 카탈로그 카드 = 읽기 전용. 열면 상세만 보여주고,
+  // 고치고 싶으면 "복제해서 편집"으로 커스텀 사본을 만들게 한다.
+  // (예전엔 그냥 저장하면 정면/측면·프롬프트가 빠진 반쪽 사본이 몰래 하나 더 생겼다)
+  function openBuiltinCardModal(card, after) {
     const bd = div('modal-backdrop');
+    const p = card.prompt_params || {};
+    const t = card.tags || {};
     bd.innerHTML = `
-      <div class="modal">
+      <div class="modal" style="width:min(640px,100%)">
+        <div class="eyebrow">Built-in · 기본 카탈로그</div>
+        <h2>${escapeHtml(card.name)}</h2>
+        <div class="sub">${escapeHtml(card.name_en || '')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+          ${[[card.front_image, '정면'], [card.side_image, '측면']].filter(x => x[0]).map(([src, lb]) => `
+            <div><div class="thumb-upload" style="cursor:default"><img src="${src}" alt="${escapeAttr(card.name + ' ' + lb)}"></div>
+            <div style="text-align:center;margin-top:6px;font-size:11px;color:var(--text-faint);letter-spacing:.1em">${lb}</div></div>`).join('')}
+        </div>
+        <div class="field" style="margin-top:16px"><label>태그</label>
+          <div class="tags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+            ${[t.length, t.perm, t.difficulty].filter(Boolean).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join('')}
+          </div></div>
+        ${p.cut || p.top || p.finish ? `<div class="field" style="margin-top:14px"><label>AI 지시문</label>
+          <div class="purge-note" style="margin-top:8px;line-height:1.7">
+            ${[p.cut && `<b>Cut</b> ${escapeHtml(p.cut)}`, p.top && `<b>Top</b> ${escapeHtml(p.top)}`,
+               p.finish && `<b>Finish</b> ${escapeHtml(p.finish)}`].filter(Boolean).join('<br>')}
+          </div></div>` : ''}
+        <div class="purge-note" style="margin-top:16px">기본 카탈로그 카드는 <b>수정·삭제할 수 없습니다.</b>
+          내용을 바꾸려면 사본을 만들어 편집하세요.</div>
+        <div class="modal-actions">
+          <div style="flex:1"></div>
+          <button class="ghost-btn" id="bClose">닫기</button>
+          <button class="primary-btn" id="bDup">복제해서 편집</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bd);
+    $('#bClose', bd).onclick = () => bd.remove();
+    bd.onclick = e => { if (e.target === bd) bd.remove(); };
+    $('#bDup', bd).onclick = () => {
+      bd.remove();
+      // 정면·측면·영문명·프롬프트까지 통째로 들고 간다 (id 만 새로 발급).
+      // 편집기는 name_ko 를 우선으로 읽으므로 둘 다 갱신해야 "사본"이 붙는다.
+      const base = card.name_ko || card.name;
+      openCardModal({ ...card, id: null, name_ko: base + ' 사본', name: base + ' 사본' }, after);
+    };
+  }
+
+  function openCardModal(card, after) {
+    const isEdit = !!(card && card.id);
+    const src = card || {};
+    const data = {
+      name: src.name_ko || src.name || '',
+      name_en: src.name_en || '',
+      desc: (src.desc && src.desc !== src.name_en) ? src.desc : '',
+      gender: src.gender || 'male',
+      front_image: src.front_image || src.image || '',
+      side_image: src.side_image || '',
+      tags: { ...(src.tags || {}) },
+      prompt_params: src.prompt_params ? { ...src.prompt_params } : undefined,
+    };
+    const bd = div('modal-backdrop');
+    const shot = (key, label) => `
+      <div><div class="thumb-upload" id="up_${key}" data-key="${key}">${
+        data[key] ? `<img src="${data[key]}">` : `＋<br>${label}`}</div>
+        <div style="text-align:center;margin-top:6px;font-size:11px;color:var(--text-faint);letter-spacing:.1em">${label}</div></div>`;
+
+    bd.innerHTML = `
+      <div class="modal" style="width:min(720px,100%)">
         <h2>${isEdit ? '스타일 카드 수정' : '새 스타일 카드'}</h2>
-        <div class="sub">실제 시술 결과 사진을 올리면 미리보기 품질이 좋아집니다. (없으면 헤어 라인으로 표시)</div>
-        <div style="display:grid;grid-template-columns:140px 1fr;gap:20px">
-          <div><div class="thumb-upload" id="thumbUp">${data.image ? `<img src="${data.image}">` : '＋<br>시술컷'}</div></div>
+        <div class="sub">정면·측면 2장을 올리면 AI가 옆·뒤 길이까지 참고합니다. (없으면 헤어 라인으로 표시)</div>
+        <div style="display:grid;grid-template-columns:120px 120px 1fr;gap:16px;margin-top:16px">
+          ${shot('front_image', '정면')}
+          ${shot('side_image', '측면')}
           <div>
-            <div class="field"><label>스타일명</label><input id="fName" value="${escapeAttr(data.name)}" placeholder="예: 레이어드 단발 · 애쉬브라운"></div>
-            <div class="field" style="margin-top:12px"><label>설명 (선택)</label><textarea id="fDesc" rows="2" placeholder="시술 포인트">${escapeHtml(data.desc || '')}</textarea></div>
+            <div class="field"><label>스타일명</label><input id="fName" value="${escapeAttr(data.name)}" placeholder="예: 쉐도우펌"></div>
+            <div class="field" style="margin-top:12px"><label>영문명 (선택)</label><input id="fNameEn" value="${escapeAttr(data.name_en)}" placeholder="예: Shadow Perm"></div>
+            <div class="field" style="margin-top:12px"><label>성별</label>
+              <select id="fGender">
+                <option value="male"${data.gender === 'male' ? ' selected' : ''}>남성</option>
+                <option value="female"${data.gender === 'female' ? ' selected' : ''}>여성</option>
+              </select></div>
           </div>
         </div>
+        <div class="field" style="margin-top:14px"><label>설명 / AI 지시 포인트 (선택)</label>
+          <textarea id="fDesc" rows="2" placeholder="예: 옆은 타이트하게, 앞머리는 눈썹 살짝 덮게">${escapeHtml(data.desc)}</textarea></div>
         <div id="tagGroups" style="margin-top:18px"></div>
         <div class="modal-actions">
           ${isEdit ? '<button class="danger-btn" id="delCard">삭제</button>' : ''}
@@ -413,9 +488,10 @@
         </div>
       </div>`;
     document.body.appendChild(bd);
+
     const tg = $('#tagGroups', bd);
     Object.entries(LumainData.TAG_OPTIONS).forEach(([key, opts]) => {
-      const label = { length: '길이', color: '컬러', perm: '펌/질감', difficulty: '난이도' }[key];
+      const label = { length: '길이', perm: '펌/질감', difficulty: '난이도' }[key] || key;
       const wrap = div('field'); wrap.innerHTML = `<label>${label}</label><div class="tag-picker" data-key="${key}"></div>`;
       const picker = $('.tag-picker', wrap);
       opts.forEach(o => {
@@ -426,18 +502,48 @@
       });
       tg.appendChild(wrap);
     });
-    const thumbUp = $('#thumbUp', bd);
-    thumbUp.onclick = () => {
-      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
-      inp.onchange = async () => { if (!inp.files[0]) return; data.image = await fileToDataUrl(inp.files[0], 800); thumbUp.innerHTML = `<img src="${data.image}">`; };
-      inp.click();
-    };
+
+    $$('.thumb-upload', bd).forEach(box => {
+      box.onclick = () => {
+        const key = box.dataset.key;
+        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+        inp.onchange = async () => {
+          if (!inp.files[0]) return;
+          data[key] = await fileToDataUrl(inp.files[0], 800);
+          box.innerHTML = `<img src="${data[key]}">`;
+        };
+        inp.click();
+      };
+    });
+
     $('#cancelCard', bd).onclick = () => bd.remove();
-    if (isEdit) $('#delCard', bd).onclick = () => { if (confirm('이 카드를 삭제할까요?')) { LumainData.deleteCard(card.id); bd.remove(); after && after(); } };
+    bd.onclick = e => { if (e.target === bd) bd.remove(); };
+    if (isEdit) $('#delCard', bd).onclick = () => {
+      if (!confirm('이 카드를 삭제할까요?')) return;
+      if (LumainData.deleteCard(card.id)) { bd.remove(); after && after(); }
+      else toast('기본 카탈로그 카드는 삭제할 수 없습니다.');
+    };
     $('#saveCard', bd).onclick = () => {
       const name = $('#fName', bd).value.trim();
       if (!name) return toast('스타일명을 입력하세요.');
-      LumainData.upsertCard({ id: card?.id, name, desc: $('#fDesc', bd).value.trim(), image: data.image, tags: data.tags });
+      try {
+        LumainData.upsertCard({
+          id: card?.id || null,
+          name_ko: name,
+          name_en: $('#fNameEn', bd).value.trim(),
+          gender: $('#fGender', bd).value,
+          desc: $('#fDesc', bd).value.trim(),
+          front_image: data.front_image,
+          side_image: data.side_image,
+          tags: data.tags,
+          prompt_params: data.prompt_params,
+        });
+      } catch (e) {
+        // 사진 2장이 base64 로 들어가므로 브라우저 저장 한도를 넘길 수 있다.
+        return toast(/quota|exceed/i.test(e.name + e.message)
+          ? '저장 공간이 가득 찼습니다. 기존 카드를 정리하거나 사진 용량을 줄여주세요.'
+          : '저장에 실패했습니다: ' + e.message);
+      }
       bd.remove(); after && after();
     };
   }
@@ -525,12 +631,35 @@
     const t = c.tags || {};
     const tagHtml = [
       t.length && `<span class="tag">${t.length}</span>`,
-      t.color && `<span class="tag">${t.color}</span>`,
       t.perm && `<span class="tag">${t.perm}</span>`,
+      t.difficulty && `<span class="tag diff">${t.difficulty}</span>`,
     ].filter(Boolean).join('');
+
+    // 정면(기본) + 측면. 전환은 썸네일 위 버튼으로 — 태블릿엔 호버가 없고,
+    // 선택 상태와 뷰 상태는 서로 독립이어야 한다(고른 뒤에도 정면을 볼 수 있게).
+    const front = c.front_image || c.image || '';
+    const side = c.side_image || '';
+    const img = (cls, src, lb) =>
+      `<img class="${cls}" src="${src}" alt="${escapeAttr(c.name)} ${lb}" loading="lazy" decoding="async">`;
+    const thumb = front
+      ? img('front', front, '정면') +
+        (side ? img('side', side, '측면') + '<button type="button" class="view-toggle">측면 보기</button>' : '')
+      : hairSilhouette(t);
+
     el.innerHTML = `
-      <div class="thumb">${c.image ? `<img src="${c.image}" alt="">` : hairSilhouette(t)}<div class="select-badge">✓</div></div>
-      <div class="meta"><div class="name">${escapeHtml(c.name)}</div><div class="tags">${tagHtml}</div></div>`;
+      <div class="thumb">${thumb}<div class="select-badge">✓</div></div>
+      <div class="meta">
+        <div class="name">${escapeHtml(c.name)}</div>
+        ${c.name_en ? `<div class="name-en">${escapeHtml(c.name_en)}</div>` : ''}
+        <div class="tags">${tagHtml}</div>
+      </div>`;
+
+    const vt = $('.view-toggle', el);
+    if (vt) vt.onclick = e => {
+      e.stopPropagation();                       // 뷰 전환이 선택을 건드리지 않게
+      const on = el.classList.toggle('show-side');
+      vt.textContent = on ? '정면 보기' : '측면 보기';
+    };
     return el;
   }
 

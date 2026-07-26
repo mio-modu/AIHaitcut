@@ -103,8 +103,26 @@ HairAi/
 ├─ index.html          진입점
 ├─ 실행하기.bat         로컬 서버 실행(카메라용)
 ├─ css/styles.css      태블릿 가로 UI
+├─ public/images/      내장 모델컷 (스타일당 정면 N_1.webp + 측면 N_2.webp)
 └─ js/
    ├─ data.js          스타일 카드 DB + 크레딧 (localStorage)
    ├─ generate.js      ★ 생성 엔진 (Gemini 실연동 + 데모 + 워터마크) ← 교체 지점
    └─ app.js           화면 전환 + 응대 플로우 + 설정
 ```
+
+### 스타일 카탈로그 (현재 남성 4종)
+
+`js/data.js` 의 `STYLE_CARDS` 배열에 객체만 추가하면 늘어납니다.
+
+| 필드 | 설명 |
+|---|---|
+| `front_image` / `side_image` | 정면·측면 모델컷. **둘 다 Gemini 요청에 첨부**되어 옆·뒤 길이까지 참고됩니다 |
+| `tags` | `length` / `perm` / `difficulty` — 카드에 표시 + 프롬프트에 포함 |
+| `prompt_params` | `cut` / `top` / `finish` / `keywords` — **AI 지시문 본문**. 여기가 재현도를 좌우합니다 |
+| `gender` | `male` / `female`. 스튜디오 메뉴는 현재 `male` 만 노출 (`app.js` `listCards({gender:'male'})`) |
+
+모델컷은 WebP 로 넣으세요. 900px 폭 / 품질 82 기준 장당 30~50KB 면 충분합니다.
+(PNG 원본 1.8MB → WebP 40KB, 8장 합계 13.9MB → 276KB)
+
+내장 카탈로그는 **읽기 전용**입니다. 원장이 고치려면 "스타일 관리 → 카드 선택 →
+복제해서 편집" 으로 커스텀 사본을 만들며, 사본은 정면·측면·프롬프트를 그대로 물려받습니다.
