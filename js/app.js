@@ -131,9 +131,27 @@
       S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 960 }, audio: false });
       const v = $('#video'); v.srcObject = S.stream;
       $('#btnCapture').onclick = () => {
+        // ★ 화면에 보이는 그대로 찍는다.
+        //   video 는 object-fit:cover 라 카메라 원본(가로 4:3)의 좌우가 잘려 보인다.
+        //   예전엔 videoWidth/Height 전체를 찍어서, 원장이 가이드 타원에 맞춘 구도와
+        //   실제로 저장된 사진이 서로 달랐다(옆에 딴 게 들어오고 얼굴은 작아짐).
+        //   보이는 영역만 잘라내면 얼굴이 프레임을 채워 Gemini 에 가는 해상도도 올라간다.
+        const rect = v.getBoundingClientRect();
+        const boxAR = rect.width / rect.height;
+        const vidAR = v.videoWidth / v.videoHeight;
+        let sw, sh, sx, sy;
+        if (vidAR > boxAR) {          // 영상이 더 넓다 → 좌우가 잘려 보이는 중
+          sh = v.videoHeight; sw = Math.round(sh * boxAR);
+          sx = Math.round((v.videoWidth - sw) / 2); sy = 0;
+        } else {                      // 영상이 더 높다 → 위아래가 잘려 보이는 중
+          sw = v.videoWidth; sh = Math.round(sw / boxAR);
+          sx = 0; sy = Math.round((v.videoHeight - sh) / 2);
+        }
         const cv = document.createElement('canvas');
-        cv.width = v.videoWidth; cv.height = v.videoHeight;
-        const ctx = cv.getContext('2d'); ctx.translate(cv.width, 0); ctx.scale(-1, 1); ctx.drawImage(v, 0, 0);
+        cv.width = sw; cv.height = sh;
+        const ctx = cv.getContext('2d');
+        ctx.translate(sw, 0); ctx.scale(-1, 1);   // 미리보기가 거울이므로 되돌린다
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh);
         S.faceImage = cv.toDataURL('image/jpeg', 0.92);
         stopCamera(); updateOriginal(); updateMenuFoot();
       };
@@ -212,6 +230,7 @@
     // 결과 표시
     const r = S.results[S.shown] || S.results.find(x => x.dataUrl) || S.results[0];
     const card = r ? LumainData.getCard(r.cardId) : null;
+    const okCount = S.results.filter(x => x.dataUrl).length;
     if (tag) tag.textContent = card ? card.name : '';
     body.innerHTML = `
       <div class="stage-box">
@@ -225,9 +244,13 @@
         ${S.results.length > 1 ? `<div class="result-strip">${S.results.map((x, i) => x.error
             ? `<div class="rs err ${i===S.shown?'on':''}" data-i="${i}">✕</div>`
             : `<div class="rs ${i===S.shown?'on':''}" data-i="${i}"><img src="${x.dataUrl}"></div>`).join('')}</div>` : ''}
+        ${r && r.error ? `<div class="stage-tools">
+          <button class="tool-btn" id="btnRetry">↻ 이 스타일만 다시 시도</button>
+        </div>` : ''}
         ${r && !r.error ? `<div class="stage-tools">
           <button class="tool-btn" id="btnZoom">⤢ 크게 보기</button>
-          <button class="tool-btn" id="btnSave">↓ 이미지 저장</button>
+          <button class="tool-btn" id="btnSave">↓ 저장</button>
+          ${okCount > 1 ? `<button class="tool-btn" id="btnSaveAll">↓ 전체 ${okCount}장</button>` : ''}
         </div>` : ''}
         <div class="confirm-inline ${S.understood?'checked':''}" id="cUnderstand">
           <div class="box">✓</div>
@@ -245,16 +268,58 @@
     $('#btnRestart').onclick = () => { resetSession(true); renderStudio(); };
     $('#btnConfirm').onclick = onConfirm;
     const zoom = $('#btnZoom'), save = $('#btnSave'), simg = $('.stage-img.zoomable');
+    const saveAllBtn = $('#btnSaveAll'), retry = $('#btnRetry');
     if (zoom) zoom.onclick = () => openLightbox(S.shown);
     if (simg) simg.onclick = () => openLightbox(S.shown);
     if (save) save.onclick = () => saveResult(r);
+    if (saveAllBtn) saveAllBtn.onclick = saveAllResults;
+    if (retry) retry.onclick = () => retryOne(S.shown);
+  }
+
+  // ---- 실패한 컷만 다시 시도 -----------------------------------
+  //  4개를 돌리다 한 장만 실패하는 일이 흔한데, 예전엔 전체를 다시 돌려야 해서
+  //  성공한 컷까지 버리고 크레딧도 다시 썼다. 실패한 자리만 채워 넣는다.
+  async function retryOne(i) {
+    const rec = S.results[i];
+    if (!rec) return;
+    if (!S.faceImage) return toast('손님 사진이 없습니다. 다시 촬영해주세요.');
+    const card = LumainData.getCard(rec.cardId);
+    if (!card) return toast('스타일 카드를 찾을 수 없습니다.');
+    if (LumainData.getCredit() < 1) return toast('크레딧이 부족합니다.');
+
+    S.generating = true; updateResult(); updateMenuFoot();
+    S.genElapsed = 0;
+    S.genTimer = setInterval(() => {
+      S.genElapsed++; const e = $('#elapsed'); if (e) e.innerHTML = `${S.genElapsed}<span>s</span>`;
+    }, 1000);
+    try {
+      const out = await LumainGen.generatePreview({ faceImage: S.faceImage, styleCard: card, onProgress: () => {} });
+      S.results[i] = { cardId: card.id, ...out };
+      LumainData.chargeCredit(1);                  // 성공했을 때만 차감 (기획서 6절)
+      S.shown = i;
+    } catch (err) {
+      S.results[i] = { cardId: card.id, dataUrl: null, source: 'error', error: err.message };
+      toast('다시 시도했지만 실패했습니다. 크레딧은 차감되지 않았습니다.');
+    }
+    clearInterval(S.genTimer); S.genTimer = null;
+    S.generating = false;
+    refreshCredit(); updateResult(); updateMenuFoot();
+  }
+
+  // ---- 성공한 컷 전부 저장 (테스트 기간 기록용) -----------------
+  function saveAllResults() {
+    const items = S.results.filter(x => x.dataUrl);
+    if (!items.length) return toast('저장할 이미지가 없습니다.');
+    // 브라우저가 연속 다운로드를 묶어서 막는 경우가 있어 간격을 둔다.
+    items.forEach((it, i) => setTimeout(() => saveResult(it, true), i * 400));
+    toast(`${items.length}장을 저장합니다.`);
   }
 
   // ---- 결과 저장 (테스트 기간 기록용) --------------------------
   //  워터마크가 이미 픽셀에 구워져 있으므로 저장본에도 그대로 남는다.
   //  2단계(백엔드)에서 이력이 서버에 쌓이면 이 버튼은 보조 수단이 된다.
-  function saveResult(r) {
-    if (!r || !r.dataUrl) return toast('저장할 이미지가 없습니다.');
+  function saveResult(r, quiet) {
+    if (!r || !r.dataUrl) return quiet ? undefined : toast('저장할 이미지가 없습니다.');
     const c = LumainData.getCard(r.cardId);
     const name = String((c && (c.name_ko || c.name)) || 'style').replace(/[\\/:*?"<>|\s]+/g, '_');
     const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -263,7 +328,7 @@
     a.href = r.dataUrl;
     a.download = `lumain_${name}_${stamp}.jpg`;   // 결과는 항상 JPEG (bakeWatermark)
     document.body.appendChild(a); a.click(); a.remove();
-    toast('이미지를 저장했습니다.');
+    if (!quiet) toast('이미지를 저장했습니다.');
   }
 
   // ---- 결과 크게 보기 -----------------------------------------
@@ -285,36 +350,51 @@
         <div class="lb-stage">
           ${items.length > 1 ? '<button class="lb-nav prev" id="lbPrev">‹</button>' : ''}
           <img id="lbImg" alt="AI 예상 이미지">
+          <span class="lb-badge" id="lbBadge">AI 예상 이미지</span>
           ${items.length > 1 ? '<button class="lb-nav next" id="lbNext">›</button>' : ''}
         </div>
         <div class="lb-foot">
           <span class="muted" id="lbCount"></span>
-          <button class="tool-btn" id="lbSave">↓ 이미지 저장</button>
+          <span class="lb-btns">
+            ${S.faceImage ? '<button class="tool-btn" id="lbCompare">◑ 원본과 비교</button>' : ''}
+            <button class="tool-btn" id="lbSave">↓ 저장</button>
+          </span>
         </div>
       </div>`;
     document.body.appendChild(bd);
 
+    // 손님에게 "이렇게 달라집니다"를 보여주는 게 이 화면의 목적이라,
+    // 같은 자리에서 원본으로 툭 바꿔 보여줄 수 있어야 한다(좌우 배치보다 대비가 크다).
+    let showOrig = false;
     const paint = () => {
       const it = items[pos];
       const c = LumainData.getCard(it.cardId);
-      $('#lbImg', bd).src = it.dataUrl;
+      const cmp = $('#lbCompare', bd);
+      $('#lbImg', bd).src = showOrig ? S.faceImage : it.dataUrl;
+      $('#lbBadge', bd).textContent = showOrig ? '손님 원본' : 'AI 예상 이미지';
+      $('#lbBadge', bd).classList.toggle('orig', showOrig);
+      if (cmp) cmp.textContent = showOrig ? '◑ 결과 보기' : '◑ 원본과 비교';
       $('#lbName', bd).textContent = c ? c.name : 'AI 예상 이미지';
       $('#lbCount', bd).textContent = items.length > 1 ? `${pos + 1} / ${items.length}` : '';
       // 닫았을 때 뒤 화면이 방금 보던 컷으로 맞아 있게 한다.
       if (S.shown !== it.i) { S.shown = it.i; updateResult(); }
     };
-    const move = d => { pos = (pos + d + items.length) % items.length; paint(); };
+    // 컷을 넘기면 항상 결과부터 — 원본을 띄운 채 넘어가면 무엇을 보는지 헷갈린다.
+    const move = d => { pos = (pos + d + items.length) % items.length; showOrig = false; paint(); };
     const onKey = e => {
       if (e.key === 'Escape') close();
       else if (e.key === 'ArrowLeft' && items.length > 1) move(-1);
       else if (e.key === 'ArrowRight' && items.length > 1) move(1);
+      else if ((e.key === ' ' || e.key === 'Spacebar') && S.faceImage) { e.preventDefault(); showOrig = !showOrig; paint(); }
     };
     function close() { document.removeEventListener('keydown', onKey); bd.remove(); }
 
     document.addEventListener('keydown', onKey);
     $('#lbClose', bd).onclick = close;
     bd.onclick = e => { if (e.target === bd) close(); };
-    $('#lbSave', bd).onclick = () => saveResult(items[pos]);
+    $('#lbSave', bd).onclick = () => saveResult(items[pos]);   // 저장은 항상 결과컷
+    const cmpBtn = $('#lbCompare', bd);
+    if (cmpBtn) cmpBtn.onclick = () => { showOrig = !showOrig; paint(); };
     if (items.length > 1) {
       $('#lbPrev', bd).onclick = () => move(-1);
       $('#lbNext', bd).onclick = () => move(1);
@@ -361,7 +441,13 @@
     const r = S.results[S.shown];
     const card = r ? LumainData.getCard(r.cardId) : null;
     const retain = S.consent.retain;
-    if (!retain) { S.faceImage = null; }
+    if (!retain) {
+      // 완료 화면은 "원본과 결과를 방금 파기했다"고 손님에게 고지한다.
+      // 예전엔 원본만 지우고 결과는 그대로 들고 있었다 — 고지와 실제가 달랐다.
+      // 고지한 순간에 실제로 지운다.
+      S.faceImage = null;
+      S.results = []; S.shown = 0; S.understood = false;
+    }
     openDone(card, retain);
   }
 

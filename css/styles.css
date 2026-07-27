@@ -461,6 +461,15 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 .lb-nav.prev { left: 10px; }
 .lb-nav.next { right: 10px; }
 .lb-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.lb-btns { display: flex; gap: 8px; }
+/* 지금 보고 있는 것이 원본인지 결과인지 — 비교 전환 중 헷갈리지 않게 못박는다 */
+.lb-badge {
+  position: absolute; left: 12px; bottom: 12px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  background: rgba(10,11,13,.72); border: 1px solid var(--accent); color: var(--accent-2);
+  padding: 6px 11px; pointer-events: none;
+}
+.lb-badge.orig { border-color: var(--line-2); color: var(--text-dim); }
 .modal .sub { color: var(--text-dim); font-size: 13.5px; margin-bottom: 22px; font-weight: 300; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 26px; }
 
