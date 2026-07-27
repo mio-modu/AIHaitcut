@@ -10,3 +10,4 @@ _original_images/
 public/images/*.jpg
 public/images/*.jpeg
 public/images/*.png
+.vercel

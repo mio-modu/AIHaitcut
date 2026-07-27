@@ -5,3 +5,10 @@ tools/
 *.zip
 *.bat
 README.md
+
+# ★ Vercel 은 git 이 아니라 로컬 파일을 그대로 올린다. .gitignore 로 막아도
+#   여기서 또 막지 않으면 배포된다. public/images 에는 카탈로그 모델컷
+#   (N_1.webp / N_2.webp) 만 올라가야 하고, 손님·테스트 인물 사진은 절대 안 된다.
+public/images/*.jpg
+public/images/*.jpeg
+public/images/*.png
