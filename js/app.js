@@ -219,12 +219,16 @@
         ${r && r.error
           ? `<div class="result-empty"><div class="ic" style="color:var(--danger)">✕</div>
              <p style="color:var(--danger)">생성 실패<br><span class="muted">${escapeHtml(r.error).slice(0,90)}</span><br>크레딧은 차감되지 않았습니다.</p></div>`
-          : `<img class="stage-img" src="${r.dataUrl}" alt="예상 이미지">`}
+          : `<img class="stage-img zoomable" src="${r.dataUrl}" alt="예상 이미지" title="누르면 크게 봅니다">`}
       </div>
       <div class="stage-extra">
         ${S.results.length > 1 ? `<div class="result-strip">${S.results.map((x, i) => x.error
             ? `<div class="rs err ${i===S.shown?'on':''}" data-i="${i}">✕</div>`
             : `<div class="rs ${i===S.shown?'on':''}" data-i="${i}"><img src="${x.dataUrl}"></div>`).join('')}</div>` : ''}
+        ${r && !r.error ? `<div class="stage-tools">
+          <button class="tool-btn" id="btnZoom">⤢ 크게 보기</button>
+          <button class="tool-btn" id="btnSave">↓ 이미지 저장</button>
+        </div>` : ''}
         <div class="confirm-inline ${S.understood?'checked':''}" id="cUnderstand">
           <div class="box">✓</div>
           <div class="ct"><b>예상 이미지</b>이며 시술 조건에 따라 <b>실제 결과는 다를 수 있음</b>을 이해했습니다.</div>
@@ -240,6 +244,82 @@
     ci.onclick = () => { S.understood = ci.classList.toggle('checked'); const b = $('#btnConfirm'); if (b) b.disabled = !S.understood; };
     $('#btnRestart').onclick = () => { resetSession(true); renderStudio(); };
     $('#btnConfirm').onclick = onConfirm;
+    const zoom = $('#btnZoom'), save = $('#btnSave'), simg = $('.stage-img.zoomable');
+    if (zoom) zoom.onclick = () => openLightbox(S.shown);
+    if (simg) simg.onclick = () => openLightbox(S.shown);
+    if (save) save.onclick = () => saveResult(r);
+  }
+
+  // ---- 결과 저장 (테스트 기간 기록용) --------------------------
+  //  워터마크가 이미 픽셀에 구워져 있으므로 저장본에도 그대로 남는다.
+  //  2단계(백엔드)에서 이력이 서버에 쌓이면 이 버튼은 보조 수단이 된다.
+  function saveResult(r) {
+    if (!r || !r.dataUrl) return toast('저장할 이미지가 없습니다.');
+    const c = LumainData.getCard(r.cardId);
+    const name = String((c && (c.name_ko || c.name)) || 'style').replace(/[\\/:*?"<>|\s]+/g, '_');
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const a = document.createElement('a');
+    a.href = r.dataUrl;
+    a.download = `lumain_${name}_${stamp}.jpg`;   // 결과는 항상 JPEG (bakeWatermark)
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('이미지를 저장했습니다.');
+  }
+
+  // ---- 결과 크게 보기 -----------------------------------------
+  //  오른쪽 칸이 좁아 손님에게 보여주기 어렵다. 화면 가운데에 크게 띄운다.
+  //  실패한 컷은 건너뛰고, 성공한 것들만 ‹ › 로 넘긴다.
+  function openLightbox(startIdx) {
+    const items = S.results.map((x, i) => ({ ...x, i })).filter(x => x.dataUrl);
+    if (!items.length) return toast('아직 볼 수 있는 결과가 없습니다.');
+    let pos = items.findIndex(x => x.i === startIdx);
+    if (pos < 0) pos = 0;
+
+    const bd = div('modal-backdrop lightbox');
+    bd.innerHTML = `
+      <div class="lb-wrap">
+        <div class="lb-head">
+          <div class="lb-name" id="lbName"></div>
+          <button class="tool-btn" id="lbClose">✕ 닫기</button>
+        </div>
+        <div class="lb-stage">
+          ${items.length > 1 ? '<button class="lb-nav prev" id="lbPrev">‹</button>' : ''}
+          <img id="lbImg" alt="AI 예상 이미지">
+          ${items.length > 1 ? '<button class="lb-nav next" id="lbNext">›</button>' : ''}
+        </div>
+        <div class="lb-foot">
+          <span class="muted" id="lbCount"></span>
+          <button class="tool-btn" id="lbSave">↓ 이미지 저장</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bd);
+
+    const paint = () => {
+      const it = items[pos];
+      const c = LumainData.getCard(it.cardId);
+      $('#lbImg', bd).src = it.dataUrl;
+      $('#lbName', bd).textContent = c ? c.name : 'AI 예상 이미지';
+      $('#lbCount', bd).textContent = items.length > 1 ? `${pos + 1} / ${items.length}` : '';
+      // 닫았을 때 뒤 화면이 방금 보던 컷으로 맞아 있게 한다.
+      if (S.shown !== it.i) { S.shown = it.i; updateResult(); }
+    };
+    const move = d => { pos = (pos + d + items.length) % items.length; paint(); };
+    const onKey = e => {
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft' && items.length > 1) move(-1);
+      else if (e.key === 'ArrowRight' && items.length > 1) move(1);
+    };
+    function close() { document.removeEventListener('keydown', onKey); bd.remove(); }
+
+    document.addEventListener('keydown', onKey);
+    $('#lbClose', bd).onclick = close;
+    bd.onclick = e => { if (e.target === bd) close(); };
+    $('#lbSave', bd).onclick = () => saveResult(items[pos]);
+    if (items.length > 1) {
+      $('#lbPrev', bd).onclick = () => move(-1);
+      $('#lbNext', bd).onclick = () => move(1);
+    }
+    paint();
   }
 
   // ================= 생성 =================

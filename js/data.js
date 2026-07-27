@@ -42,6 +42,22 @@ const LumainData = (() => {
   //  각 스타일 = 정면(_1) + 측면(_2) 2장 한 세트.
   // =========================================================
   const STYLE_CARDS = [
+    /* 1줄 — 컷 · 정돈 : 컬 없이 형태와 길이로 가는 스타일 */
+    {
+      id: 'm_crop_cut',
+      name_ko: '크롭컷',
+      name_en: 'Crop Cut',
+      gender: 'male',
+      front_image: `${IMG}/5_1.webp`,
+      side_image: `${IMG}/5_2.webp`,
+      tags: { length: '숏', perm: '없음', difficulty: '쉬움' },
+      prompt_params: {
+        cut: 'short crop cut, tightly tapered faded sides and back',
+        top: 'short blunt fringe brought straight forward onto the forehead, choppy texture on top',
+        finish: 'matte, sharp, clean-cut',
+        keywords: ['crop cut', 'french crop', 'blunt fringe', 'matte texture'],
+      },
+    },
     {
       id: 'm_two_block_down',
       name_ko: '투블럭 다운펌',
@@ -58,6 +74,22 @@ const LumainData = (() => {
       },
     },
     {
+      id: 'm_slick_back',
+      name_ko: '슬릭백',
+      name_en: 'Slick Back',
+      gender: 'male',
+      front_image: `${IMG}/7_1.webp`,
+      side_image: `${IMG}/7_2.webp`,
+      tags: { length: '미디엄', perm: '없음', difficulty: '보통' },
+      prompt_params: {
+        cut: 'medium length on top with tightly tapered sides and back',
+        top: 'all hair combed straight back away from the face, forehead fully exposed',
+        finish: 'sleek, glossy, controlled',
+        keywords: ['slick back', 'combed back', 'exposed forehead', 'glossy'],
+      },
+    },
+    /* 2줄 — 앞머리 연출 : 가르마·앞머리 방향으로 인상을 바꾸는 스타일 */
+    {
       id: 'm_garma_perm',
       name_ko: '가르마펌',
       name_en: 'Side-Part Perm',
@@ -70,51 +102,6 @@ const LumainData = (() => {
         top: 'defined side part with S-curl, side-swept fringe and forehead-lifting volume',
         finish: 'soft flowing texture, dandy mood',
         keywords: ['side part perm', 'garma perm', 'side swept', 'volume'],
-      },
-    },
-    {
-      id: 'm_leaf_cut',
-      name_ko: '리프컷',
-      name_en: 'Leaf Cut',
-      gender: 'male',
-      front_image: `${IMG}/3_1.webp`,
-      side_image: `${IMG}/3_2.webp`,
-      tags: { length: '미디엄', perm: '리프펌', difficulty: '고난도' },
-      prompt_params: {
-        cut: 'layered leaf-shaped cut, airy textured layers, tapered sides',
-        top: 'light feathered fringe with movement, volume on the crown',
-        finish: 'airy, textured, trendy',
-        keywords: ['leaf cut', 'layered', 'textured', 'airy volume'],
-      },
-    },
-    {
-      id: 'm_as_perm',
-      name_ko: '애즈펌',
-      name_en: 'As Perm',
-      gender: 'male',
-      front_image: `${IMG}/4_1.webp`,
-      side_image: `${IMG}/4_2.webp`,
-      tags: { length: '미디엄', perm: '애즈펌', difficulty: '보통' },
-      prompt_params: {
-        cut: 'medium length with clean two-block sides',
-        top: 'natural loose S-curls throughout, softly curled side-swept front',
-        finish: 'natural wavy texture, relaxed volume',
-        keywords: ['as perm', 'natural curl', 's-curl', 'soft wave'],
-      },
-    },
-    {
-      id: 'm_crop_cut',
-      name_ko: '크롭컷',
-      name_en: 'Crop Cut',
-      gender: 'male',
-      front_image: `${IMG}/5_1.webp`,
-      side_image: `${IMG}/5_2.webp`,
-      tags: { length: '숏', perm: '없음', difficulty: '쉬움' },
-      prompt_params: {
-        cut: 'short crop cut, tightly tapered faded sides and back',
-        top: 'short blunt fringe brought straight forward onto the forehead, choppy texture on top',
-        finish: 'matte, sharp, clean-cut',
-        keywords: ['crop cut', 'french crop', 'blunt fringe', 'matte texture'],
       },
     },
     {
@@ -133,18 +120,34 @@ const LumainData = (() => {
       },
     },
     {
-      id: 'm_slick_back',
-      name_ko: '슬릭백',
-      name_en: 'Slick Back',
+      id: 'm_leaf_cut',
+      name_ko: '리프컷',
+      name_en: 'Leaf Cut',
       gender: 'male',
-      front_image: `${IMG}/7_1.webp`,
-      side_image: `${IMG}/7_2.webp`,
-      tags: { length: '미디엄', perm: '없음', difficulty: '보통' },
+      front_image: `${IMG}/3_1.webp`,
+      side_image: `${IMG}/3_2.webp`,
+      tags: { length: '미디엄', perm: '리프펌', difficulty: '고난도' },
       prompt_params: {
-        cut: 'medium length on top with tightly tapered sides and back',
-        top: 'all hair combed straight back away from the face, forehead fully exposed',
-        finish: 'sleek, glossy, controlled',
-        keywords: ['slick back', 'combed back', 'exposed forehead', 'glossy'],
+        cut: 'layered leaf-shaped cut, airy textured layers, tapered sides',
+        top: 'light feathered fringe with movement, volume on the crown',
+        finish: 'airy, textured, trendy',
+        keywords: ['leaf cut', 'layered', 'textured', 'airy volume'],
+      },
+    },
+    /* 3줄 — 전체 컬 · 볼륨 : 머리 전체에 컬이 들어가는 스타일 */
+    {
+      id: 'm_as_perm',
+      name_ko: '애즈펌',
+      name_en: 'As Perm',
+      gender: 'male',
+      front_image: `${IMG}/4_1.webp`,
+      side_image: `${IMG}/4_2.webp`,
+      tags: { length: '미디엄', perm: '애즈펌', difficulty: '보통' },
+      prompt_params: {
+        cut: 'medium length with clean two-block sides',
+        top: 'natural loose S-curls throughout, softly curled side-swept front',
+        finish: 'natural wavy texture, relaxed volume',
+        keywords: ['as perm', 'natural curl', 's-curl', 'soft wave'],
       },
     },
     {

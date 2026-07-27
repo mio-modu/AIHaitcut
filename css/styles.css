@@ -117,9 +117,10 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 .studio { display: flex; width: 100%; height: 100%; gap: 1px; background: var(--line); animation: fade .3s ease; }
 .col { background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
 .col-original { flex: 1 1 0; }
-/* 가운데 메뉴는 카드가 3열로 깔리므로 양옆보다 넉넉히 가져간다.
-   (1.12 이던 시절엔 2열이라 좁아도 됐다 — 3열로 바꾸면서 함께 넓힘) */
-.col-menu { flex: 1.6 1 0; }
+/* 가운데 메뉴(모델컷)는 "고르는" 칸이라 작아도 되고, 좌우의 손님 원본 /
+   AI 결과가 실제로 들여다보는 칸이다. 그래서 메뉴를 좁혀 양옆에 폭을 넘긴다.
+   모델컷은 워터마크를 잘라내며 얼굴이 커졌으므로 작아도 알아보기 충분하다. */
+.col-menu { flex: 1.05 1 0; }
 .col-result { flex: 1 1 0; }
 .col-head { flex: 0 0 auto; display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   padding: clamp(13px,1.9vh,18px) clamp(14px,1.3vw,20px) 11px; border-bottom: 1px solid var(--line); }
@@ -150,6 +151,17 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 /* 결과는 통일된 3:4 세로컷(generate.js normalizePortrait). 남는 자투리는 검은색이 아니라
    스튜디오 라이트그레이로 채워 배경과 이어지게 한다(좌우 검은 여백 방지). */
 .stage-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #d7dbe0; }
+/* 결과 이미지는 눌러서 크게 볼 수 있다 (오른쪽 칸이 좁아 손님에게 보여주기 어렵다) */
+.stage-img.zoomable { cursor: zoom-in; }
+
+/* 결과 도구 버튼 (크게 보기 · 저장) — 확정 버튼보다 한 단계 낮은 위계 */
+.stage-tools { display: flex; gap: 8px; }
+.tool-btn {
+  flex: 1; background: transparent; color: var(--text-dim);
+  border: 1px solid var(--line-2); padding: 9px 10px; font-weight: 500;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+}
+.tool-btn:hover { border-color: var(--accent); color: var(--accent-2); }
 
 /* idle 상태 — 촬영 진입 */
 .stage-idle { text-align: center; padding: 30px; }
@@ -430,6 +442,25 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(5,6,8,.72); backdrop-filter: blur(6px); display: grid; place-items: center; z-index: 100; animation: fade .2s; padding: 20px; }
 .modal { background: var(--surface); border: 1px solid var(--line-2); padding: 30px 32px; width: min(580px, 100%); max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow); }
 .modal h2 { font-size: 21px; margin-bottom: 6px; font-weight: 700; letter-spacing: -0.03em; }
+
+/* 결과 크게 보기 — 손님에게 보여주는 화면이라 이미지를 최대한 키우고
+   장식은 최소로. 여러 장 생성했으면 ‹ › 로 넘긴다. */
+.lightbox { padding: clamp(12px, 3vh, 28px); }
+.lb-wrap { width: min(720px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.lb-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.lb-name { font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--text); }
+.lb-head .tool-btn, .lb-foot .tool-btn { flex: 0 0 auto; }
+.lb-stage { position: relative; display: grid; place-items: center; background: #d7dbe0; border: 1px solid var(--line-2); }
+.lb-stage img { display: block; max-width: 100%; max-height: 72vh; }
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 42px; height: 62px; font-size: 24px; line-height: 1; font-weight: 400;
+  background: rgba(10,11,13,.66); border: 1px solid var(--line-2); color: var(--text);
+}
+.lb-nav:hover { border-color: var(--accent); color: var(--accent-2); background: rgba(10,11,13,.86); }
+.lb-nav.prev { left: 10px; }
+.lb-nav.next { right: 10px; }
+.lb-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .modal .sub { color: var(--text-dim); font-size: 13.5px; margin-bottom: 22px; font-weight: 300; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 26px; }
 
