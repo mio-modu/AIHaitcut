@@ -117,7 +117,9 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 .studio { display: flex; width: 100%; height: 100%; gap: 1px; background: var(--line); animation: fade .3s ease; }
 .col { background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
 .col-original { flex: 1 1 0; }
-.col-menu { flex: 1.12 1 0; }
+/* 가운데 메뉴는 카드가 3열로 깔리므로 양옆보다 넉넉히 가져간다.
+   (1.12 이던 시절엔 2열이라 좁아도 됐다 — 3열로 바꾸면서 함께 넓힘) */
+.col-menu { flex: 1.6 1 0; }
 .col-result { flex: 1 1 0; }
 .col-head { flex: 0 0 auto; display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   padding: clamp(13px,1.9vh,18px) clamp(14px,1.3vw,20px) 11px; border-bottom: 1px solid var(--line); }
@@ -196,7 +198,9 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
 
 /* 가운데 — 스타일 메뉴(헤어 라인 실루엣) */
 .col-menu .col-body { padding-top: clamp(14px,2vh,20px); }
-.menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 14px; align-content: start; }
+/* 카드 3열 고정. 카탈로그가 9종이라 3×3 으로 딱 떨어진다.
+   카드가 좁아진 만큼 열 간격은 조금 좁히고 행 간격은 유지(이름·태그가 붙지 않게). */
+.menu-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 12px; align-content: start; }
 .style-card .thumb svg { width: 100%; height: 100%; display: block; }
 .style-card .sil { color: var(--steel); transition: .18s ease; }
 .style-card:hover .sil, .style-card.selected .sil { color: var(--accent-2); }
@@ -212,7 +216,13 @@ button { font-family: inherit; cursor: pointer; border: none; font-weight: 600; 
   .studio { flex-direction: column; height: auto; min-height: 100%; }
   .col { flex: none !important; }
   .col-original .col-body, .col-result .col-body { min-height: 46vh; }
-  .menu-grid { grid-template-columns: repeat(3, 1fr); }
+  /* 3단이 세로로 풀리면 메뉴가 화면 전체 폭을 쓰므로 3열 그대로 두면 된다. */
+}
+
+/* 모바일 — 3열이면 카드가 120px 아래로 내려가 썸네일·측면보기 버튼이 뭉갠다.
+   2열로 낮춰 카드 폭을 확보한다. */
+@media (max-width: 620px) {
+  .menu-grid { grid-template-columns: repeat(2, 1fr); gap: 14px 10px; }
 }
 
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
