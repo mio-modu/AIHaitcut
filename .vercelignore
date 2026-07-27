@@ -1,0 +1,7 @@
+# 배포에 필요 없는 것들 — 앱은 index.html / css / js / public/images 만 있으면 돈다.
+_design_extract/
+_original_images/
+tools/
+*.zip
+*.bat
+README.md
