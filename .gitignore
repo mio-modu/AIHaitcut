@@ -4,3 +4,9 @@ desktop.ini
 *.log
 _design_extract/
 _original_images/
+
+# public/images 에는 카탈로그 모델컷(N_1.webp / N_2.webp)만 들어간다.
+# 손님·테스트 인물 사진이 실수로 공개 저장소에 올라가는 것을 막는다.
+public/images/*.jpg
+public/images/*.jpeg
+public/images/*.png

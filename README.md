@@ -192,6 +192,22 @@ magick 원본.png -crop 810x1080+43+0 +repage -resize 768x1024 -quality 82 publi
 > AI 생성 모델컷은 우하단에 워터마크가 찍혀 나옵니다. 그대로 두면 카드에도 보이고,
 > **레퍼런스로 Gemini 에 전송되어 결과에까지 번질 수 있으므로** 반드시 잘라내세요.
 
+#### 모델컷 배경 정리 (`tools/clean-model-bg.mjs`)
+
+배경에 흰 패널·밝은 얼룩이 섞여 있으면 카드가 지저분해 보이고, 그 요소가
+레퍼런스를 통해 결과컷에 번질 수 있습니다. 인물·헤어·구도는 그대로 두고
+**배경만 균일한 라이트그레이로** 바꾸는 일괄 도구입니다.
+
+```bash
+node tools/clean-model-bg.mjs --dry-run              # 대상만 확인 (호출 없음)
+node tools/clean-model-bg.mjs --key <KEY> --only 5_1 # 1장만 시험
+node tools/clean-model-bg.mjs --key <KEY>            # 18장 전부
+```
+
+- 장당 Gemini 크레딧 1회 소모 — **`--only` 로 한 장 확인한 뒤** 전체를 도세요.
+- 원본은 `_original_images/before-bg/` 에 자동 백업(최초 1회). 되돌리려면 덮어쓰기.
+- 재생성본에 워터마크가 다시 찍히므로, 받은 뒤 자동으로 크롭·3:4·768×1024 정규화합니다.
+
 PNG 원본은 `_original_images/` 에 보관합니다 (`.gitignore` 처리되어 배포에 포함되지 않음).
 
 내장 카탈로그는 **읽기 전용**입니다. 원장이 고치려면 "스타일 관리 → 카드 선택 →
